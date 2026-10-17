@@ -26,11 +26,11 @@ import 'atrust_l3_framing.dart';
 /// ## 为什么可以这么做
 ///
 /// [ATrustTunnelChannel] 是只有三个成员的 `abstract interface class`
-/// （`incoming` / `send` / `close`），装饰它就是纯转发，不改 SDK 任何行为。
-/// 工厂通过 `ATrustConnector(socketFactory: ...)` 注入，L3 与 TCP 隧道**两条**
-/// 通道都会经过这里。
+/// （`incoming` / `send` / `close`），装饰它不改帧内容，只把写入排成一条队
+/// （见 [_enqueueWrite]）并观察。工厂通过 `ATrustConnector(socketFactory: ...)`
+/// 注入，L3 与 TCP 隧道**两条**通道都会经过这里。
 ///
-/// ## 这一层做两件事
+/// ## 这一层做三件事
 ///
 /// 1. **把服务端的话记下来**。TCP 隧道认出 `05 81 53 00` 这一帧，L3 交给
 ///    [ShuL3Framer]，把认证负载里的 `status` / `code` / `message` 写成一行
@@ -41,6 +41,9 @@ import 'atrust_l3_framing.dart';
 ///
 ///    只在「服务端已经明说失败」时才补（`_authError != null`）。认证成功却没
 ///    等到连接回复的情况**不**走这里，那种失败仍然是原来那句诚实的错误。
+/// 3. **把写入排成一条队**。`ATrustSecureSocketChannel.send` 是 `add` 后
+///    `await flush()`，而 SDK 里 TCP 隧道连接的 `send` / `closeWrite` /
+///    `close` 互不互斥，重叠时会抛 `StreamSink is bound to a stream`。
 ///
 /// ## L3 那一条为什么也要解析
 ///
@@ -82,6 +85,12 @@ class ShuATrustChannelProbe implements ATrustTunnelChannel {
   int _receivedBytes = 0;
   bool _closedLogged = false;
   bool _injected = false;
+
+  /// 写入队列的队尾，以及 close 的结果（保证只关一次）。
+  ///
+  /// 见 [_enqueueWrite]。
+  Future<void> _writeTail = Future<void>.value();
+  Future<void>? _closeFuture;
 
   final BytesBuilder _handshake = BytesBuilder(copy: false);
   bool _handshakeSettled = false;
@@ -147,7 +156,10 @@ class ShuATrustChannelProbe implements ATrustTunnelChannel {
   Stream<List<int>> get incoming => _incoming ??= _wrap(_inner.incoming);
 
   @override
-  Future<void> send(Uint8List bytes) async {
+  Future<void> send(Uint8List bytes) {
+    if (_closeFuture != null) {
+      return Future<void>.error(StateError('aTrust channel is closed'));
+    }
     _sentBytes += bytes.length;
     if (_firstSend == null) {
       _firstSend = bytes;
@@ -156,13 +168,42 @@ class ShuATrustChannelProbe implements ATrustTunnelChannel {
         'aTrust 通道 #$id $_kind → 首个帧 ${bytes.length} B',
       );
     }
-    await _inner.send(bytes);
+    return _enqueueWrite(() => _inner.send(bytes));
   }
 
   @override
-  Future<void> close() async {
+  Future<void> close() {
+    final pending = _closeFuture;
+    if (pending != null) return pending;
     _report('本地关闭');
-    await _inner.close();
+    final future = _enqueueWrite(_inner.close);
+    _closeFuture = future;
+    return future;
+  }
+
+  /// 把一次写入排到队尾。
+  ///
+  /// `ATrustSecureSocketChannel.send` 是 `add` 之后 `await flush()`，而
+  /// `flush()` 会把 sink 标记成 bound；同一时刻再来一笔 `add` 或 `close`
+  /// 就抛 `Bad state: StreamSink is bound to a stream`。
+  ///
+  /// SDK 里 TCP 隧道连接的 `send` / `closeWrite`（EOF 帧）/ `close` 之间
+  /// 没有互斥；L3 的 `_writeChain` 只串行化了 `send`，它的 `close` 同样不
+  /// 等链尾。探针是所有 aTrust 通道的必经点，在这里排一次队就把两处都
+  /// 盖住，同时保证 close 不会插到还没写完的帧中间。
+  ///
+  /// 单次失败只交回给对应的调用方，不会卡死队列。
+  Future<void> _enqueueWrite(Future<void> Function() write) {
+    final completion = Completer<void>();
+    _writeTail = _writeTail.then((_) async {
+      try {
+        await write();
+        completion.complete();
+      } on Object catch (error, stackTrace) {
+        completion.completeError(error, stackTrace);
+      }
+    });
+    return completion.future;
   }
 
   /// 把「对端关了 / 出错了」记成一行。同一条通道只记一次，
