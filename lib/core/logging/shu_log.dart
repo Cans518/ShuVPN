@@ -288,6 +288,9 @@ abstract final class ShuLogTag {
 
   /// 检查更新。
   static const update = 'update';
+
+  /// 校园测速（上海大学 LibreSpeed 站）。
+  static const speedtest = 'speedtest';
 }
 
 /// 脱敏：只留首尾各 [keep] 个字符。
