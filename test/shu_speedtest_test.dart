@@ -155,13 +155,15 @@ void main() {
   });
 
   test('经隧道时上行读数跟隧道速率走，而不是回环速度', () async {
-    const bytesPerSecond = 1000 * 1000; // 8 Mbps
+    const bytesPerSecond = 2 * 1000 * 1000; // 16 Mbps
     final service = ShuSpeedTestService(
       server: target,
       dialer: (host, port) async => _ThrottledStream(
         SocketTcpStream(await Socket.connect(host, port)),
         bytesPerSecond: bytesPerSecond,
       ),
+      // 窗口要留够：CI 上光是把第一批字节推过「客户端 → 代理 → 隧道」就要
+      // 几百毫秒，窗口太短会让整段测量落在计时开始之前（读数是 0）。
       tuning: const ShuSpeedTestTuning(
         pingCount: 2,
         pingTimeout: Duration(seconds: 2),
@@ -170,23 +172,23 @@ void main() {
         downloadGrace: Duration(milliseconds: 100),
         uploadGrace: Duration(milliseconds: 300),
         downloadDuration: Duration(milliseconds: 200),
-        uploadDuration: Duration(milliseconds: 600),
+        uploadDuration: Duration(milliseconds: 1500),
         uploadBlobMiB: 1,
         uploadChunkBytes: 32 * 1024,
         sampleInterval: Duration(milliseconds: 50),
         autoShorten: false,
-        startupTimeout: Duration(seconds: 2),
+        startupTimeout: Duration(seconds: 5),
       ),
     );
 
     final report = await service
         .run(onUpdate: (_) {})
-        .timeout(const Duration(seconds: 30));
+        .timeout(const Duration(seconds: 60));
 
-    // 8 Mbps × 1.06 ≈ 8.5 Mbps。代理的排队上限（256 KiB）会让读数偏高一点，
+    // 16 Mbps × 1.06 ≈ 17 Mbps。代理的排队上限（256 KiB）会让读数偏高一点，
     // 但绝不该是回环的几百 Mbps —— 那正是「速度特别偏大」的成因。
-    expect(report.uploadMbps, greaterThan(2));
-    expect(report.uploadMbps, lessThan(25), reason: '上行计数跑到隧道前面去了');
+    expect(report.uploadMbps, greaterThan(5));
+    expect(report.uploadMbps, lessThan(40), reason: '上行计数跑到隧道前面去了');
   });
 
   test('服务端拒收正文时，丢弃的字节不会算成上传速度', () async {
