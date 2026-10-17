@@ -215,6 +215,14 @@ class _HttpProxySession {
       return;
     }
     if (_head.length > maxHeaderBytes) {
+      // 先找头结束的位置：正文常常和请求头挤在同一个数据包里（客户端一次
+      // `flush` 就把头连同几十 KiB 正文交出去），这时 `_head` 超限并不代表
+      // 头超限。只按长度判会把正常的上传请求回成 431 —— 上传块越大越容易
+      // 撞上，而且取决于平台的收包时机。
+      if (_headerEnd(_head.toBytes()) >= 0) {
+        _parseRequest();
+        return;
+      }
       unawaited(_fail(431, 'Request Header Fields Too Large'));
       return;
     }

@@ -166,6 +166,50 @@ void main() {
       unawaited(received.close());
     });
 
+    test('请求头与正文同一个数据包到达时按正常请求处理，不回 431', () async {
+      // 上传场景：客户端一次 `flush` 就把请求头连同几十 KiB 正文交出去。
+      // 早先只看「累积字节数」判头是否超限，于是这种包被判成 431 —— 而且
+      // 挂不挂取决于平台的收包时机（Linux 上必挂，Windows 上偶尔挂）。
+      final received = StreamController<List<int>>();
+      final upstream = await _startEcho(received);
+      final echoed = Completer<int>();
+      received.stream.listen((chunk) {
+        if (!echoed.isCompleted) echoed.complete(chunk.length);
+      });
+
+      final proxy = ShuHttpProxy(dialer: _dialerTo(upstream));
+      final port = await proxy.start();
+
+      final client = await Socket.connect(InternetAddress.loopbackIPv4, port);
+      final reader = _Reader(client);
+      const bodySize = 64 * 1024;
+      client.add(<int>[
+        ...utf8.encode(
+          'POST http://example.com/backend/empty.php HTTP/1.1\r\n'
+          'Host: example.com\r\n'
+          'Content-Length: $bodySize\r\n\r\n',
+        ),
+        ...List<int>.filled(bodySize, 0x41),
+      ]);
+      await _settle();
+
+      expect(
+        reader.toString(),
+        isNot(contains('431')),
+        reason: '正文与头同包不该被当成头超限',
+      );
+      // 上游应该真的收到正文（回显的首块包含头与一部分正文）。
+      expect(
+        await echoed.future.timeout(const Duration(seconds: 5)),
+        isPositive,
+      );
+
+      await client.close();
+      await proxy.close();
+      await upstream.close();
+      unawaited(received.close());
+    });
+
     test('上游拨不通时回 502，而不是 500', () async {
       final proxy = ShuHttpProxy(
         dialer: (host, port) async => throw const SocketException('refused'),
