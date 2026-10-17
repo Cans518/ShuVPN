@@ -12,6 +12,7 @@ import '../features/notifications/notifications_page.dart';
 import '../features/onboarding/welcome_page.dart';
 import '../features/services/coming_soon_page.dart';
 import '../features/services/services_page.dart';
+import '../features/services/speedtest_page.dart';
 import '../features/settings/about_page.dart';
 import '../features/settings/appearance_settings_page.dart';
 import '../features/settings/connection_settings_page.dart';
@@ -113,16 +114,13 @@ GoRouter createShuRouter({required SettingsStore settings}) {
                 path: '/services',
                 builder: (context, state) => const ServicesPage(),
                 routes: <RouteBase>[
-                  // 两个占位页。它们与下面那些设置二级页一样被推到根导航器上
-                  // ——「服务」在分支导航器里，不挂 `parentNavigatorKey` 的
-                  // 子页会被底栏盖住一半。
+                  // 与下面那些设置二级页一样被推到根导航器上 ——「服务」在
+                  // 分支导航器里，不挂 `parentNavigatorKey` 的子页会被底栏
+                  // 盖住一半。
                   _subPage(
                     parentNavigatorKey: rootNavigatorKey,
                     path: 'speedtest',
-                    builder: (context, state) => const ShuComingSoonPage(
-                      title: '网络测速',
-                      icon: Icons.speed_outlined,
-                    ),
+                    builder: (context, state) => const SpeedTestPage(),
                   ),
                   _subPage(
                     parentNavigatorKey: rootNavigatorKey,

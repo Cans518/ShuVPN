@@ -19,10 +19,10 @@ import '../../widgets/shu_app_bar.dart';
 /// 时不用读字就知道自己在哪一类。两页共用同一个组件不是省几行代码，而是让
 /// 「可点的目录行」在全应用只有一种长相。
 ///
-/// ## 还没做的两件事也各占一行
+/// 还没做的那件事也占一行
 ///
-/// 测速与图书馆目录排进了路线图，但这一版没有。给它们两行、点进去说明白，
-/// 比不放进列表好：用户能看见这两件事被算在里面，而不是怀疑自己找错了地方。
+/// 图书馆目录排进了路线图，但这一版没有。给它一行、点进去说明白，比不放进
+/// 列表好：用户能看见这件事被算在里面，而不是怀疑自己找错了地方。
 /// 那一页只有一句话（[ShuComingSoonPage]），不留排期。
 class ServicesPage extends StatelessWidget {
   const ServicesPage({super.key});
@@ -45,7 +45,7 @@ class ServicesPage extends StatelessWidget {
           SettingsRow(
             icon: Icons.speed_outlined,
             title: '网络测速',
-            subtitle: '测隧道时延与上下行带宽',
+            subtitle: '测到校内测速站的时延与上下行带宽',
             onTap: () => context.go('/services/speedtest'),
           ),
           SettingsRow(

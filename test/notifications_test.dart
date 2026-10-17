@@ -15,6 +15,7 @@ import 'package:shuvpn/core/settings/settings_store.dart';
 import 'package:shuvpn/features/notifications/announcement_detail_page.dart';
 import 'package:shuvpn/features/notifications/notifications_page.dart';
 import 'package:shuvpn/features/services/coming_soon_page.dart';
+import 'package:shuvpn/features/services/speedtest_page.dart';
 import 'package:shuvpn/shell/floating_dock.dart';
 import 'package:shuvpn/widgets/shu_surfaces.dart';
 
@@ -130,24 +131,22 @@ void main() {
       expect(find.byType(SwitchListTile), findsNothing);
     });
 
-    testWidgets('both open a page that says the future version has it', (
-      tester,
-    ) async {
+    testWidgets('测速打开测速页，图书馆仍是占位页', (tester) async {
       await _pumpApp(tester, announcements: StubShuAnnouncementClient());
       await _openTab(tester, '服务');
 
-      for (final entry in <String>['网络测速', '图书馆目录']) {
-        await _openRow(tester, entry);
+      await _openRow(tester, '网络测速');
+      expect(find.byType(SpeedTestPage), findsOneWidget);
+      expect(find.text('开始测速'), findsOneWidget);
+      await tester.tap(find.byTooltip('返回'));
+      await tester.pumpAndSettle();
 
-        expect(find.byType(ShuComingSoonPage), findsOneWidget);
-        expect(find.text('未来版本提供服务'), findsOneWidget);
-        // 占位页只此一句：不写排期，也不留第二行小字。
-        expect(find.byType(EmptyState), findsOneWidget);
-        expect(find.text(entry), findsWidgets, reason: '顶栏标题就是这一项的名字');
-
-        await tester.tap(find.byTooltip('返回'));
-        await tester.pumpAndSettle();
-      }
+      await _openRow(tester, '图书馆目录');
+      expect(find.byType(ShuComingSoonPage), findsOneWidget);
+      expect(find.text('未来版本提供服务'), findsOneWidget);
+      // 占位页只此一句：不写排期，也不留第二行小字。
+      expect(find.byType(EmptyState), findsOneWidget);
+      expect(find.text('图书馆目录'), findsWidgets, reason: '顶栏标题就是这一项的名字');
     });
   });
 
