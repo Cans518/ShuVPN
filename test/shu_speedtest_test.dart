@@ -352,9 +352,12 @@ void main() {
         .run(onUpdate: (_) {})
         .timeout(const Duration(seconds: 30));
 
-    // 服务端每 100 ms 收一块，量级是几 Mbps；无背压时是几千 Mbps。
+    // 服务端每 100 ms 收一块。读数里必然含「已经写进内核、对端还没读」的那
+    // 一段，而这段的大小取决于平台默认的 socket 缓冲（Linux 上比 Windows
+    // 大得多，实测同一份代码 266 与 120 的差别）。所以门槛只卡一个数量级：
+    // 无背压那次是几千 Mbps，正常实现不会过 800。
     expect(report.uploadMbps, greaterThan(0));
-    expect(report.uploadMbps, lessThan(200), reason: '上行计数跑到服务端真实接收速度前面去了');
+    expect(report.uploadMbps, lessThan(800), reason: '上行计数跑到服务端真实接收速度前面去了');
   });
 
   test('取消之后抛 cancelled，不会继续跑完', () async {
