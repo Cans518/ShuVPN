@@ -30,6 +30,8 @@ class ShuAppBar extends StatelessWidget implements PreferredSizeWidget {
     this.onNotifications,
     this.actions,
     this.backTooltip = '返回',
+    this.bottom,
+    this.bottomHeight = 3,
   });
 
   /// 栏高。与 Material 的 `AppBar` 默认值相同，所以替换前后**垂直方向
@@ -75,8 +77,20 @@ class ShuAppBar extends StatelessWidget implements PreferredSizeWidget {
   /// 以后要在某一页加个「刷新」之类的入口时，不必再回来改这个 widget。
   final List<Widget>? actions;
 
+  /// 贴在栏底的细条槽位（测速页用它显示进度）。为 null 时不占高度，
+  /// 其余页面完全不受影响。
+  ///
+  /// 槽位之所以由调用方给而不是内建一根条：这个 widget 只负责排版，不知道
+  /// 进度从哪来；而把条放在这里、而不是页面 body 的第一项，条才能随栏固定
+  /// 在顶部，不会跟着内容滚走。
+  final Widget? bottom;
+
+  /// [bottom] 的高度。默认 3 就能看清；页面对齐时把它算进顶栏总高。
+  final double bottomHeight;
+
   @override
-  Size get preferredSize => const Size.fromHeight(toolbarHeight);
+  Size get preferredSize =>
+      Size.fromHeight(toolbarHeight + (bottom == null ? 0 : bottomHeight));
 
   @override
   Widget build(BuildContext context) {
@@ -131,6 +145,20 @@ class ShuAppBar extends StatelessWidget implements PreferredSizeWidget {
       ),
     );
 
-    return SafeArea(bottom: false, child: bar);
+    return SafeArea(
+      bottom: false,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          bar,
+          if (bottom != null)
+            SizedBox(
+              height: bottomHeight,
+              width: double.infinity,
+              child: bottom,
+            ),
+        ],
+      ),
+    );
   }
 }
