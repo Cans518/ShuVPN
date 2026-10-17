@@ -205,6 +205,13 @@ class ConnectionController extends ChangeNotifier {
 
   bool get tunnelUp => _dialer != null;
 
+  /// 隧道内的 TCP 拨号器。未连接时为 null。
+  ///
+  /// 给内部消费者（目前是测速）复用同一条隧道与同一套分流判定。它与两条
+  /// 本机代理用的是同一个函数，但**不需要**先把它们打开 —— 这正是
+  /// 「三个数据面全关也能测」的依据。
+  SangforTcpDialer? get tunnelDialer => _dialer;
+
   /// 本机 SOCKS5 代理是否在跑。
   bool get socksProxyRunning => _socks5 != null;
 
