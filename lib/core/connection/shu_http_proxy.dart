@@ -152,13 +152,39 @@ class _HttpProxySession {
   final void Function(_HttpProxySession session) onFinished;
   final SangforCancellationToken? cancellationToken;
 
+  /// 上行排队超过这个量就暂停读客户端。
+  ///
+  /// 回环 socket 的读速度是几 GB/s，而隧道往往只有几十 Mbps；不设上限的话，
+  /// 一个上传请求的几 MB 正文会在几毫秒内全灌进这里，客户端看到的「已写出」
+  /// 与隧道实际吞吐完全脱钩（测速会报出回环速度）。暂停之后由 TCP 把背压
+  /// 传回客户端，写出去的量重新等于隧道吃掉多少。
+  static const int _backpressureBytes = 256 * 1024;
+
+  /// 下游写入累计超过这个量就先 `flush` 再继续读上游。
+  ///
+  /// `Socket.add` 同样只是往待写队列里塞；客户端读得稍慢一点，队列就会
+  /// 一路涨。测速下行每段结束都会强制断开客户端，队列里那一坨在断开前
+  /// 都还活着 —— 六条流叠加起来就是一次 OOM。
+  static const int _downstreamFlushBytes = 512 * 1024;
+
+  /// 拨号期间最多先攒这么多正文。
+  ///
+  /// `pause()` 之后的字节不会再进来，这个上限只是兜住「暂停与数据到达"
+  /// 之间的那一次竞态，以及不认 `pause` 的实现。
+  static const int _bodyBufferBytes = 2 * 1024 * 1024;
+
   final BytesBuilder _head = BytesBuilder(copy: false);
   SangforTcpStream? _upstream;
   Future<void> _sendChain = Future<void>.value();
   StreamSubscription<Uint8List>? _upstreamSubscription;
   StreamSubscription<List<int>>? _clientSubscription;
   bool _tunnelling = false;
+  bool _requestStarted = false;
   bool _closed = false;
+  int _queuedBytes = 0;
+  bool _pausedForBackpressure = false;
+  int _pendingDownstream = 0;
+  bool _flushingDownstream = false;
 
   void start() {
     _clientSubscription = socket.listen(
@@ -166,6 +192,8 @@ class _HttpProxySession {
       onDone: _onClientDone,
       onError: (Object _) => close(),
     );
+    // 写失败（客户端中途离开）通过 `done` 报出来，不接住就是一条未处理异常。
+    unawaited(socket.done.then<void>((_) {}, onError: (Object _) {}));
   }
 
   void _onClientData(Uint8List chunk) {
@@ -175,6 +203,17 @@ class _HttpProxySession {
       return;
     }
     _head.add(chunk);
+    if (_requestStarted) {
+      // 请求头已经发出去、隧道还在拨号。这一段是正文，先攒着并暂停读取，
+      // 交给 TCP 去背压 —— 否则上传正文会先全落到这里。
+      _clientSubscription?.pause();
+      if (_head.length > _bodyBufferBytes) {
+        // 暂停之后理论上到不了这里；真到了说明对端不认背压，宁可拒掉也
+        // 不能无界往下攒。
+        unawaited(_fail(413, 'Payload Too Large'));
+      }
+      return;
+    }
     if (_head.length > maxHeaderBytes) {
       unawaited(_fail(431, 'Request Header Fields Too Large'));
       return;
@@ -203,6 +242,15 @@ class _HttpProxySession {
     // 头之后的字节属于正文/管道，一个都不能丢 —— 客户端常常把请求体
     // 和请求头一起写出来（Pipelining）。
     final carried = Uint8List.fromList(bytes.sublist(end + 4));
+    // 一个连接只解析一次。解析完之后陆续到的字节是正文，由 `_openTunnel`
+    // 在隧道建立后按序送出；再解析一遍会把正文当成第二个请求，还会把同一条
+    // 请求发两次。
+    //
+    // 必须清掉 `_head`：`toBytes()` 返回的是副本、**不清空**缓冲区，留着的话
+    // 下面 `_openTunnel` 会把整条请求再发一遍 —— 服务端就会看到「同一条
+    // 请求来了两次」，多余的响应回到客户端就是 `unsolicited response`。
+    _head.clear();
+    _requestStarted = true;
     final method = parts[0].toUpperCase();
     final target = parts[1];
 
@@ -285,10 +333,17 @@ class _HttpProxySession {
     _upstream = stream;
     _tunnelling = true;
     if (replyTunnelEstablished) {
-      socket.add(ascii.encode('HTTP/1.1 200 Connection Established\r\n\r\n'));
+      try {
+        socket.add(ascii.encode('HTTP/1.1 200 Connection Established\r\n\r\n'));
+      } on Object {
+        // 客户端在这条隧道拨号完成之前就走了。
+        await close();
+        await stream.close();
+        return;
+      }
     }
     _upstreamSubscription = stream.incoming.listen(
-      socket.add,
+      (chunk) => _pumpDownstream(chunk),
       onDone: () async {
         try {
           await socket.flush();
@@ -299,13 +354,65 @@ class _HttpProxySession {
       },
       onError: (Object _) => close(),
     );
+    // 拨号期间暂停过读取，攒下的正文要排在 `carried` 后面。
+    //
+    // 先恢复读取再入队：`_enqueueSend` 自己可能因为背压再次暂停，顺序反了
+    // 会把那次暂停一并撤掉。
+    final pending = _head.toBytes();
+    _head.clear();
+    _clientSubscription?.resume();
     if (carried.isNotEmpty) _enqueueSend(carried);
+    if (pending.isNotEmpty) _enqueueSend(pending);
+  }
+
+  /// 把上游字节写给客户端，必要时用 `flush` 把队列压回内核。
+  ///
+  /// 暂停的是**上游**订阅：客户端跟不上时不再继续从隧道里拿数据，
+  /// 队列于是被钉在 [_downstreamFlushBytes] 附近。
+  void _pumpDownstream(List<int> chunk) {
+    if (_closed) return;
+    try {
+      socket.add(chunk);
+    } on Object {
+      // 客户端已经走了。测速每一段结束时都会强制关掉客户端，这是常态。
+      unawaited(close());
+      return;
+    }
+    _pendingDownstream += chunk.length;
+    if (_flushingDownstream || _pendingDownstream < _downstreamFlushBytes) {
+      return;
+    }
+    _flushingDownstream = true;
+    _pendingDownstream = 0;
+    _upstreamSubscription?.pause();
+    unawaited(
+      socket
+          .flush()
+          .then<void>(
+            (_) {},
+            onError: (Object _) {
+              if (!_closed) unawaited(close());
+            },
+          )
+          .whenComplete(() {
+            _flushingDownstream = false;
+            if (!_closed) _upstreamSubscription?.resume();
+          }),
+    );
   }
 
   /// 串行化上行写入：分块必须保序，每块写完再写下一块。
+  ///
+  /// 排队超过 [_backpressureBytes] 时暂停客户端读取 —— 这是「测出来的上行
+  /// 速度」与「隧道实际吐出的速度」保持同一个数的前提。
   void _enqueueSend(Uint8List chunk) {
     final stream = _upstream;
     if (stream == null) return;
+    _queuedBytes += chunk.length;
+    if (_queuedBytes > _backpressureBytes && !_pausedForBackpressure) {
+      _pausedForBackpressure = true;
+      _clientSubscription?.pause();
+    }
     _sendChain = _sendChain
         .then((_) async {
           if (_closed || stream.isClosed) return;
@@ -313,7 +420,22 @@ class _HttpProxySession {
         })
         .catchError((Object _) {
           // 发送失败会经由流的错误路径把会话拆掉。
+        })
+        .whenComplete(() {
+          _queuedBytes -= chunk.length;
+          if (_queuedBytes < 0) _queuedBytes = 0;
+          _resumeIfDrained();
         });
+  }
+
+  /// 队列排空后恢复读取。
+  ///
+  /// 只有「因为背压暂停过」才恢复：拨号阶段那次暂停由 `_openTunnel` 自己
+  /// 收尾，这里顺手恢复会把它提前放掉。
+  void _resumeIfDrained() {
+    if (!_pausedForBackpressure || _queuedBytes > 0) return;
+    _pausedForBackpressure = false;
+    _clientSubscription?.resume();
   }
 
   Future<void> _onClientDone() async {
