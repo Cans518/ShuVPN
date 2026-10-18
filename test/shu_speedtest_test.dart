@@ -123,6 +123,12 @@ void main() {
           update.downloadMbps != null,
     );
     expect(downloadSettle.downloadMbps, closeTo(report.downloadMbps, 1e-9));
+    final downloadLastSample = updates.lastWhere(
+      (update) =>
+          update.phase == ShuSpeedTestPhase.download &&
+          update.downloadMbps == null,
+    );
+    expect(report.downloadMbps, closeTo(downloadLastSample.speedMbps, 1e-9));
     final uploadSettle = updates.firstWhere(
       (update) =>
           update.phase == ShuSpeedTestPhase.upload &&
@@ -130,6 +136,11 @@ void main() {
           update.uploadMbps != null,
     );
     expect(uploadSettle.uploadMbps, closeTo(report.uploadMbps, 1e-9));
+    final uploadLastSample = updates.lastWhere(
+      (update) =>
+          update.phase == ShuSpeedTestPhase.upload && update.uploadMbps == null,
+    );
+    expect(report.uploadMbps, closeTo(uploadLastSample.speedMbps, 1e-9));
   });
 
   test('给了隧道拨号器时，请求经临时回环代理走拨号器', () async {

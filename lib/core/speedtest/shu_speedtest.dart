@@ -272,7 +272,7 @@ class ShuSpeedTestProgress {
 
   final ShuSpeedTestPhase phase;
 
-  /// 当前阶段的瞬时速度。`ping` 阶段为 0。
+  /// 当前阶段从宽限结束至今的平均速度。`ping` 阶段为 0。
   final double speedMbps;
 
   /// 当前阶段的完成度，0..1。

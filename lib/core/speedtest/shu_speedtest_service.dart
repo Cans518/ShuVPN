@@ -490,7 +490,7 @@ class ShuSpeedTestService implements ShuSpeedTestRunner {
         tuning.downloadGrace.inMilliseconds +
         tuning.downloadDuration.inMilliseconds;
 
-    // [speed] 是表盘上的瞬时速度；「下载」那一格不在测量中更新 —— 瞬时值
+    // [speed] 是表盘上到目前为止的窗口均速；「下载」那一格不在测量中更新 —— 读数
     // 每 100 毫秒跳一次没有意义，等阶段结束用平均值填上去。
     void report(double speed) {
       final elapsedMs = watch.elapsedMicroseconds / 1000 + bonusMs;
@@ -538,6 +538,7 @@ class ShuSpeedTestService implements ShuSpeedTestRunner {
         // 每 200 毫秒缩短一点，单次最多 400 毫秒。
         bonusMs += math.min(5.0 * bytesPerSecond / 100000, 400.0);
       }
+      // 累计响应字节 / 宽限结束后的实际秒数；1.06 仅估算链路开销。
       measured = bytesPerSecond * 8 * tuning.overheadFactor / 1000000;
       report(measured);
       if (tMs + bonusMs > tuning.downloadDuration.inMilliseconds ||
@@ -555,14 +556,16 @@ class ShuSpeedTestService implements ShuSpeedTestRunner {
 
     _throwIfCancelled();
     if (failure != null) throw _mapError(failure!);
-    if (_sum(bytes) == 0) {
+    if (measured <= 0) {
       throw const ShuSpeedTestException(
         '测速服务器没有返回数据',
         kind: ShuSpeedTestFailure.unreachable,
       );
     }
     return (
-      mbps: _windowMbps(bytes, watch, windowStartUs),
+      // 最后一拍已用当时的字节数 / 已经过的测量时间算好均速；关闭连接与
+      // 等待流退出的时间不属于测速窗口，不能在收尾后再读 Stopwatch。
+      mbps: measured,
       latencyMs: probe.minMs,
     );
   }
@@ -730,6 +733,7 @@ class ShuSpeedTestService implements ShuSpeedTestRunner {
       if (tuning.autoShorten) {
         bonusMs += math.min(5.0 * bytesPerSecond / 100000, 400.0);
       }
+      // 上传计的是 flush 后交给内核的字节，不是服务端逐字节确认的量。
       measured = bytesPerSecond * 8 * tuning.overheadFactor / 1000000;
       report(measured);
       if (tMs + bonusMs > tuning.uploadDuration.inMilliseconds ||
@@ -747,16 +751,13 @@ class ShuSpeedTestService implements ShuSpeedTestRunner {
 
     _throwIfCancelled();
     if (failure != null) throw _mapError(failure!);
-    if (_sum(bytes) == 0) {
+    if (measured <= 0) {
       throw const ShuSpeedTestException(
         '测速服务器没有接收数据',
         kind: ShuSpeedTestFailure.unreachable,
       );
     }
-    return (
-      mbps: _windowMbps(bytes, watch, windowStartUs),
-      latencyMs: probe.minMs,
-    );
+    return (mbps: measured, latencyMs: probe.minMs);
   }
 
   // ------------------------------------------------------------------ 公共
@@ -849,23 +850,6 @@ class ShuSpeedTestService implements ShuSpeedTestRunner {
       total += value;
     }
     return total;
-  }
-
-  /// 整个测量窗口的平均速率。
-  ///
-  /// 测速的通用公式是「累计字节 ÷ 累计时间」× 8 × 开销补偿，而不是某一个
-  /// 采样点的瞬时值：瞬时值会被一条流重开、一次缓存抖动拉低或抬高，窗口
-  /// 平均才是这一阶段真正跑出来的带宽。
-  ///
-  /// 窗口从宽限结束、字节清零那一刻算起 —— 与两个测速函数里 `windowStartUs`
-  /// 的语义一致。
-  double _windowMbps(List<int> bytes, Stopwatch watch, int windowStartUs) {
-    final windowMs = math.max(
-      1.0,
-      (watch.elapsedMicroseconds - windowStartUs) / 1000,
-    );
-    final bytesPerSecond = _sum(bytes) / (windowMs / 1000);
-    return bytesPerSecond * 8 * tuning.overheadFactor / 1000000;
   }
 
   /// 上传用的不可压缩数据。
