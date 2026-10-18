@@ -1,0 +1,109 @@
+[workspace]
+members = ["."]
+resolver = "2"
+
+[package]
+name = "shuvpn_core"
+version = "0.1.0"
+edition = "2021"
+publish = false
+license = "AGPL-3.0"
+
+[features]
+egress-probe = []
+tun-probe = []
+
+[[example]]
+name = "egress_namespace_smoke"
+required-features = ["egress-probe"]
+
+[[example]]
+name = "windows_egress_smoke"
+required-features = ["egress-probe"]
+
+[[example]]
+name = "windows_tun_smoke"
+required-features = ["tun-probe"]
+
+[[example]]
+name = "desktop_windows_tun_smoke"
+required-features = ["tun-probe"]
+
+[[example]]
+name = "desktop_windows_full_smoke"
+required-features = ["tun-probe"]
+
+[[example]]
+name = "linux_tun_helper_smoke"
+required-features = ["tun-probe"]
+
+[[bin]]
+name = "shuvpn_tun_helper"
+path = "src/bin/shuvpn_tun_helper.rs"
+
+[lib]
+crate-type = ["cdylib", "staticlib", "rlib"]
+
+[dependencies]
+anyhow = "1"
+flutter_rust_bridge = "=2.11.1"
+base64 = "0.23"
+cookie = "0.18"
+cookie_store = { version = "=0.22.1", default-features = false }
+psl = "=2.1.241"
+rsa = "=0.9.10"
+zeroize = "=1.9.1"
+getrandom = "0.2"
+reqwest = { version = "=0.12.28", default-features = false, features = ["json", "rustls-tls"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+aes = "=0.8.4"
+cbc = { version = "=0.1.2", features = ["alloc", "block-padding"] }
+serde = { version = "1", features = ["derive"] }
+serde_yaml_ng = "=0.10.0"
+idna = "1"
+regex = "=1.13.1"
+scraper = { version = "=0.27.0", default-features = false }
+ego-tree = "=0.11.0"
+aho-corasick = "=1.1.5"
+hickory-proto = { version = "=0.25.2", default-features = false, features = ["std"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time", "net", "io-util", "fs", "process"] }
+tokio-util = { version = "0.7", features = ["rt"] }
+tokio-rustls = { version = "0.26", default-features = false }
+rustls = { version = "0.23", default-features = false, features = ["std", "tls12", "ring"] }
+ipnet = "2"
+socket2 = { version = "=0.6.5", features = ["all"] }
+smoltcp = { version = "=0.14.0", default-features = false, features = ["std", "medium-ip", "proto-ipv4", "proto-ipv6", "socket-tcp"] }
+md-5 = "0.10"
+sha2 = "=0.10.9"
+sangfor-core = { git = "https://github.com/preca-hoshino/flutter_sangfor.git", rev = "91a7efb2533ae87708ce6c221b3dea4d7fdf1098" }
+sangfor-tls = { git = "https://github.com/preca-hoshino/flutter_sangfor.git", rev = "91a7efb2533ae87708ce6c221b3dea4d7fdf1098" }
+
+[dev-dependencies]
+rcgen = "=0.13.2"
+tempfile = "3"
+tokio = { version = "1", features = ["test-util"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = "0.2"
+rtnetlink = "=0.23.0"
+netlink-packet-route = "=0.33.0"
+futures-util = "0.3"
+
+[target.'cfg(any(target_os = "windows", target_os = "linux"))'.dependencies]
+hyper = { version = "=1.12.0", default-features = false, features = ["http1", "client", "server"] }
+hyper-util = { version = "=0.1.21", default-features = false, features = ["tokio"] }
+http-body-util = "=0.1.5"
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows-sys = { version = "=0.61.2", features = ["Win32_Foundation", "Win32_NetworkManagement_IpHelper", "Win32_NetworkManagement_Ndis", "Win32_Networking_WinSock", "Win32_Security", "Win32_Security_Authorization", "Win32_Security_Cryptography", "Win32_Storage_FileSystem", "Win32_System_Com", "Win32_System_Pipes", "Win32_System_LibraryLoader", "Win32_System_Memory", "Win32_System_Registry", "Win32_System_Threading", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(frb_expand)'] }
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+
+[profile.release]
+lto = "thin"
+strip = "debuginfo"

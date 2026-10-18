@@ -28,7 +28,7 @@ import '../../widgets/shu_surfaces.dart';
 /// 二是它的返回手势、字号缩放、深色模式都要单独伺候；三是列表页本来就是
 /// 解析出来的（站点连分页都要自己算），正文再交给 WebView 等于两套东西拼在
 /// 一起。代价是站点换模板时要跟着改选择器 —— 那一层集中在
-/// `core/announcements/shu_announcement_parser.dart` 里，界面上不出现。
+/// Rust 公告模块里，界面上不出现。
 ///
 /// ## 列表是「滑到底自动续」
 ///
@@ -62,9 +62,8 @@ import '../../widgets/shu_surfaces.dart';
 /// ## 这些活一帧也不能挡
 ///
 /// 十条正文一起回来，取、解码、解析、重画，每一步都落在用户正在滑这一页的
-/// 那几秒里。所以：解码与解析在后台 isolate 上做（`ShuAnnouncementParserHost`，
-/// [prefetchConcurrency] 于是只是一个速度参数，拧多大都不会挤占界面
-/// isolate）；预览回一条只重画一次（[_flushPreviews]）；刷新之后上一轮的预取
+/// 那几秒里。所以请求并发、缓存选择、解码与解析由原生批次负责；
+/// 预览回一条只重画一次（[_flushPreviews]）；刷新之后上一轮的预取
 /// 作废（[_prefetchEpoch]），不会有一批过期结果追着新列表写进去。
 ///
 /// ## 列表按月份分段
@@ -75,16 +74,6 @@ import '../../widgets/shu_surfaces.dart';
 /// 一个列表」—— 那样懒加载会在每一组里重启，几百条一起建出来。
 class NotificationsPage extends StatefulWidget {
   const NotificationsPage({super.key});
-
-  /// 预取正文的并发数。
-  ///
-  /// 一页 10 条，全放出去就是 10 个并发连接。三路下一屏大约两三轮就填满了，
-  /// 比一条条排队快得多，又不会为了十行摘要把站点的连接数吃满。
-  ///
-  /// 它只管预览多快长出来，不影响帧：解码与解析在后台 isolate 上（见
-  /// `ShuAnnouncementParserHost`），回到界面 isolate 的只有合并过的一次重画
-  /// （见 [_flushPreviews]）。调大只会更吃站点的连接数。
-  static const int prefetchConcurrency = 3;
 
   /// 列表最上面那一行来源说明的 key，给测试用。
   static const Key sourceNoticeKey = ValueKey<String>(
@@ -134,6 +123,8 @@ class _NotificationsPageState extends State<NotificationsPage> {
 
   /// 预取的轮次。刷新会让上一轮作废 —— 那些结果属于上一份列表。
   int _prefetchEpoch = 0;
+  final _prefetches =
+      <ShuAnnouncementPrefetch, StreamSubscription<ShuAnnouncementPreview>?>{};
 
   /// 预览是不是有一批等着重画。见 [_flushPreviews]。
   bool _flushScheduled = false;
@@ -160,6 +151,8 @@ class _NotificationsPageState extends State<NotificationsPage> {
 
   @override
   void dispose() {
+    _prefetchEpoch++;
+    _cancelPrefetches();
     _scroll
       ..removeListener(_onScroll)
       ..dispose();
@@ -179,19 +172,20 @@ class _NotificationsPageState extends State<NotificationsPage> {
 
   Future<void> _loadFirstPage() async {
     final client = context.read<ShuAnnouncementClient>();
+    final epoch = ++_prefetchEpoch;
+    _cancelPrefetches();
     setState(() {
       _loading = true;
+      _loadingMore = false;
       _error = null;
     });
     try {
       final page = await client.fetchList();
-      if (!mounted) return;
+      if (!mounted || epoch != _prefetchEpoch) return;
       // 第一页是整份替换，去重的账要从头记 —— 不清空的话刷新回来的每一条都
       // 会被当成「已经见过」，列表会当场变空。
       _seen.clear();
       final fresh = _dedupe(page.items);
-      // 从这一刻起上一轮的预取算过期：它手上那份是旧列表的条目。
-      _prefetchEpoch++;
       setState(() {
         _items
           ..clear()
@@ -202,7 +196,7 @@ class _NotificationsPageState extends State<NotificationsPage> {
       });
       unawaited(_prefetch(fresh));
     } on Object catch (error) {
-      if (!mounted) return;
+      if (!mounted || epoch != _prefetchEpoch) return;
       setState(() {
         _error = error;
         _loading = false;
@@ -215,24 +209,24 @@ class _NotificationsPageState extends State<NotificationsPage> {
   /// 失败**不清空已经拿到的条目**，也不把 [_nextPage] 丢掉 —— 用户滑到的位置
   /// 是他自己的进度，一次请求失败不该把它抹掉。下一次滑到底会自动再试。
   Future<void> _loadMore() async {
+    final epoch = _prefetchEpoch;
     final next = _nextPage;
     if (next == null) return;
     final client = context.read<ShuAnnouncementClient>();
     setState(() => _loadingMore = true);
     try {
       final page = await client.fetchList(page: next);
-      if (!mounted) return;
+      if (!mounted || epoch != _prefetchEpoch) return;
       final fresh = _dedupe(page.items);
       setState(() {
         _items.addAll(fresh);
-        // 空页却还带「下页」时停下：继续跟下去就是死循环。
-        _nextPage = page.items.isEmpty ? null : page.nextPage;
+        _nextPage = page.nextPage;
         _loadingMore = false;
         _rebuildRows();
       });
       unawaited(_prefetch(fresh));
     } on Object catch (error) {
-      if (!mounted) return;
+      if (!mounted || epoch != _prefetchEpoch) return;
       setState(() => _loadingMore = false);
       showShuSnack(context, '加载更多失败：$error');
     }
@@ -244,46 +238,50 @@ class _NotificationsPageState extends State<NotificationsPage> {
   /// 一行摘要弹一条报错，比那两行字没出来更像个故障。点开时详情页会再拉一次
   /// （那条路会报错，也会让用户重试）。
   ///
-  /// 三个 worker 抢一个游标而不是 `Future.wait(items)`：**顺序**才有意义，写
-  /// 在前面的那几篇先有预览，用户最先看的就是它们。
+  /// 页面只订阅原生批次，不持有请求队列或缓存命中策略。
   Future<void> _prefetch(List<ShuAnnouncementListItem> items) async {
-    if (items.isEmpty) return;
     final client = context.read<ShuAnnouncementClient>();
     final epoch = _prefetchEpoch;
-    var cursor = 0;
-
-    Future<void> worker() async {
-      while (mounted && epoch == _prefetchEpoch) {
-        final index = cursor++;
-        if (index >= items.length) return;
-        final item = items[index];
-        final key = item.url.toString();
-        // 外站的条目不取（见 isShuAnnouncementUrl）—— 去了也排不出正文，
-        // 而且那是别人的站。它们没有预览。
-        if (!isShuAnnouncementUrl(item.url)) continue;
-        // 下拉刷新拉回来的还是那几条，它们的预览已经在手上。
-        if (_previews.containsKey(key)) continue;
-        try {
-          final detail = await client.fetchDetail(item);
-          if (!mounted || epoch != _prefetchEpoch) return;
-          final preview = detail.preview;
-          if (preview.isEmpty) continue;
-          _previews[key] = preview;
-          _flushPreviews();
-        } on Object {
-          // 见上：预取失败不打扰用户。
-        }
+    try {
+      final batch = await client.prefetch(items);
+      if (!mounted || epoch != _prefetchEpoch) {
+        batch.cancel();
+        return;
       }
+      _prefetches[batch] = null;
+      final subscription = batch.previews.listen(
+        (preview) {
+          if (!mounted || epoch != _prefetchEpoch) return;
+          final text = preview.text;
+          if (text == null || text.isEmpty) return;
+          _previews[preview.url.toString()] = text;
+          _flushPreviews();
+        },
+        onError: (Object _) {
+          // Optional preview errors do not replace the list's error state.
+        },
+        onDone: () {
+          unawaited(_prefetches.remove(batch)?.cancel());
+          batch.cancel();
+        },
+      );
+      if (_prefetches.containsKey(batch)) {
+        _prefetches[batch] = subscription;
+      } else {
+        unawaited(subscription.cancel());
+      }
+    } on Object {
+      // Opening a preview batch is optional; detail navigation reports errors.
     }
+  }
 
-    await Future.wait<void>(<Future<void>>[
-      for (
-        var index = 0;
-        index < NotificationsPage.prefetchConcurrency;
-        index++
-      )
-        worker(),
-    ]);
+  void _cancelPrefetches() {
+    final active = _prefetches.entries.toList();
+    _prefetches.clear();
+    for (final entry in active) {
+      entry.key.cancel();
+      unawaited(entry.value?.cancel());
+    }
   }
 
   /// 把攒下的预览合成一次重画。
@@ -338,7 +336,10 @@ class _NotificationsPageState extends State<NotificationsPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: ShuAppBar(title: '通知', onBack: () => Navigator.of(context).pop()),
-      body: RefreshIndicator(onRefresh: _loadFirstPage, child: _body()),
+      body: SafeArea(
+        top: false,
+        child: RefreshIndicator(onRefresh: _loadFirstPage, child: _body()),
+      ),
     );
   }
 
@@ -368,8 +369,7 @@ class _NotificationsPageState extends State<NotificationsPage> {
     return ListView.separated(
       controller: _scroll,
       physics: const AlwaysScrollableScrollPhysics(),
-      // 底部留出底栏的高度（`DockShell` 的 `extendBody` 会把内容垫到栏下面），
-      // 续页那一行也落在这个内边距里。
+      // 续页行之后保留与其它列表一致的底部间距。
       padding: const EdgeInsets.fromLTRB(
         ShuSpacing.page,
         8,

@@ -271,7 +271,7 @@ abstract final class ShuLogTag {
   /// 连接与隧道。
   static const conn = 'conn';
 
-  /// Android `VpnService`。
+  /// 桌面 TUN 控制面。
   static const vpn = 'vpn';
 
   /// VPN 数据面上的**逐个包**：去了哪、命中哪条资源、结果如何。

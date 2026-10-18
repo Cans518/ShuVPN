@@ -1,5 +1,5 @@
 name: shuvpn
-description: "SHU RVPN (Sangfor EasyConnect / aTrust) client for Android, signed in through the university's unified identity provider."
+description: "SHU RVPN client for Windows and Linux, signed in through the university's unified identity provider."
 # The following line prevents the package from being accidentally published to
 # pub.dev using `flutter pub publish`. This is preferred for private packages.
 publish_to: 'none' # Remove this line if you wish to publish to pub.dev
@@ -9,8 +9,6 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 # followed by an optional build number separated by a +.
 # Both the version and the builder number may be overridden in flutter
 # build by specifying --build-name and --build-number, respectively.
-# In Android, build-name is used as versionName while build-number used as versionCode.
-# Read more about Android versioning at https://developer.android.com/studio/publish/versioning
 version: 0.4.2+9
 
 environment:
@@ -20,56 +18,26 @@ dependencies:
   flutter:
     sdk: flutter
 
-  # Sangfor aTrust / Easy Connect support, in pure Dart.
-  #
-  # `flutter_sangfor` owns the session lifecycle and the userspace SOCKS5
-  # frontend; the two connector packages carry the protocol cores and never
-  # depend on each other. All three are published on pub.dev.
-  #
-  # The root package is overridden below to the `preca-hoshino` fork, which is
-  # the seam where a fix would land if upstream does not take one. The Android
-  # `VpnTunnelService` bug it exists for is still present in 0.0.12 -- see the
-  # class doc in `lib/core/connection/shu_android_vpn.dart` for what it does
-  # and why the app runs its own `ShuVpnService` instead.
-  #
-  # Pinned to exact versions on purpose, not `^0.0.12`. The three are published
-  # in lockstep and do not compile when a connector moves ahead of the root
-  # package -- 0.0.8's `tcp_termination.dart` builds on types that only that
-  # release's root package defines. The lock records the mirror URL it was
-  # written against, so CI -- which talks to pub.dev -- discards it and
-  # re-resolves; exact pins make that re-resolution land on the same versions
-  # either way. Lift all three together, then drop these pins back to a caret.
-  flutter_sangfor: 0.0.12
-  flutter_sangfor_easy_connect: 0.0.12
-  flutter_sangfor_atrust: 0.0.12
-
-  # The userspace SOCKS5 frontend. Pure Dart, so it runs on every platform
-  # the app does -- that is what makes the proxy the fallback data plane
-  # where a system-VPN interface is unavailable (desktop without
-  # privileges) or not capture-everything by design (Android).
-  socks5_proxy: ^2.1.1
-
-  # HTML 解析用（信息办公告页是 VSB CMS 渲染出来的 HTML，站点没有 JSON 接口）。
-  # 只依赖 DOM 与选择器那一半 —— 网络仍走 `dart:io`，与 `core/auth` 同一条路。
-  html: ^0.15.6
-
-  # SHA-256 of the server certificate, for the trust-on-first-use store.
-  crypto: ^3.0.3
-
-  # RSA PKCS#1 v1.5, required by the SHU unified-identity password exchange
-  # (`POST newsso.shu.edu.cn/oauth/userLogin`) and by the aTrust tunnel core.
-  pointycastle: ^4.0.0
-  http: ^1.6.0
-
-  # Persists the pinned certificate fingerprint per server.
+  # Reads old preferences for one-time adoption by the native owners.
   shared_preferences: ^2.3.3
   provider: ^6.1.5+1
   go_router: ^18.0.1
+
+  flutter_rust_bridge: 2.11.1
+  freezed_annotation: 3.1.0
+  path_provider: 2.1.6
+  window_manager: 0.5.2
+  system_tray: 2.0.3
+  shuvpn_core:
+    path: rust_builder
 
   # Launches the enterprise-WeChat app for the QR confirmation page.
   url_launcher: ^6.3.2
 
 dev_dependencies:
+  crypto: ^3.0.3
+  freezed: 3.2.5
+  build_runner: 2.15.1
   flutter_test:
     sdk: flutter
 
@@ -79,19 +47,6 @@ dev_dependencies:
   # package. See that file for information about deactivating specific lint
   # rules and activating additional ones.
   flutter_lints: ^6.0.0
-
-# `flutter_sangfor_atrust` / `flutter_sangfor_easy_connect` declare
-# `flutter_sangfor` as a hosted dependency; an override is the only way to make
-# every dependent resolve to the fork instead. `ref: main` is pinned by the SHA
-# recorded in `pubspec.lock`, so advancing the fork takes an explicit
-# `flutter pub upgrade` plus the lock commit. Drop this block once the patches
-# land upstream.
-dependency_overrides:
-  flutter_sangfor:
-    git:
-      url: https://github.com/preca-hoshino/flutter_sangfor.git
-      ref: main
-      path: packages/flutter_sangfor
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
@@ -108,7 +63,13 @@ flutter:
   # disappears on a dark surface; the widget picks by brightness.
   assets:
     - assets/images/
+    - assets/fonts/OFL.txt
 
+  fonts:
+    - family: LXGWWenKaiScreen
+      fonts:
+        - asset: assets/fonts/LXGWWenKaiScreen.ttf
+          weight: 400
 
   # To add assets to your application, add an assets section, like this:
   # assets:

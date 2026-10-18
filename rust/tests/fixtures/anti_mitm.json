@@ -1,0 +1,26 @@
+{
+  "code": 0,
+  "data": {
+    "isLogin": 1,
+    "csrfToken": "fixture-csrf",
+    "first": {
+      "duplicate": "first"
+    },
+    "second": {
+      "duplicate": "last",
+      "flag": true,
+      "absent": null,
+      "": "bmp",
+      "𐀀": "supplementary"
+    },
+    "antiMITMAttackData": {
+      "enable": 1,
+      "devicePubKeyMod": "AABBCCDDEEFF00112233445566778899",
+      "devicePubKeyExp": "65537",
+      "challenge": "挑战 anti-MITM / deterministic fixture",
+      "encryptedChallenge": "F6E21469A999422E7F5C83BAC074E9EBF3651743FAA67BC2CDD1769A649E736575BA221531E15714BE98E5DD0C547E77",
+      "rsaCert": "DRQbIikwNz5FTFNaYWhvdn2Ei5KZoKeutbzDytHY3+bt9PsCCRAXHiUsMzpBSE9WXWRrcnmAh46VnKOqsbi/xs3U2+Lp8Pf+BQwTGiEoLzY9REtSWWBnbnV8g4qRmJ+mrbS7wsnQ197l7PP6AQgPFh0kKzI5QEdOVVxjanF4f4Y=",
+      "mitmSig": "B8284EE27F06E00AED4D51E6C57A06F7D4EAB8F487719A9BD7CF221EF61FFDD2"
+    }
+  }
+}

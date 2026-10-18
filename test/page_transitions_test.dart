@@ -20,12 +20,15 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:shuvpn/app/app.dart';
 import 'package:shuvpn/core/logging/shu_log.dart';
-import 'package:shuvpn/core/settings/settings_store.dart';
+
+import 'settings_stub.dart';
+
 import 'package:shuvpn/features/notifications/notifications_page.dart';
 import 'package:shuvpn/features/onboarding/welcome_page.dart';
 import 'package:shuvpn/shell/floating_dock.dart';
 
 import 'announcement_stub.dart';
+import 'account_stub.dart';
 import 'shu_update_stub.dart';
 
 /// 与 `widget_test.dart` 的视口一致：一台高瘦的手机（逻辑 360×1800）。
@@ -39,11 +42,12 @@ void _viewport(WidgetTester tester) {
 Future<void> _pumpApp(WidgetTester tester) async {
   _viewport(tester);
   SharedPreferences.setMockInitialValues(<String, Object>{});
-  final settings = await SettingsStore.load();
+  final settings = await StubSettingsStore.load();
   settings.welcomeCompleted = true;
   await tester.pumpWidget(
     ShuVpnApp(
       settings: settings,
+      accountCenter: StubAccountCenter(),
       updateClient: StubShuUpdateClient(),
       // 通知页一打开就拉列表；这里装的是空替身，所以它停在「暂无公告」而不
       // 是去连 shu.edu.cn。
@@ -59,7 +63,8 @@ Future<void> _pumpFreshInstall(WidgetTester tester) async {
   SharedPreferences.setMockInitialValues(<String, Object>{});
   await tester.pumpWidget(
     ShuVpnApp(
-      settings: await SettingsStore.load(),
+      settings: await StubSettingsStore.load(),
+      accountCenter: StubAccountCenter(),
       updateClient: StubShuUpdateClient(),
     ),
   );

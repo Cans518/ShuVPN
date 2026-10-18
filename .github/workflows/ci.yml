@@ -66,16 +66,27 @@ jobs:
         if: steps.changes.outputs.code == 'true'
         uses: subosito/flutter-action@v2
         with:
+          flutter-version: "3.47.2"
           channel: stable
           cache: true
 
       - name: Install dependencies
         if: steps.changes.outputs.code == 'true'
-        run: flutter pub get
+        run: flutter pub get --enforce-lockfile
+
+      - name: Verify reviewed Dart backend boundary
+        if: steps.changes.outputs.code == 'true'
+        run: |
+          python3 -m unittest discover -s test/tool -p test_dart_boundary.py
+          python3 tool/verify_dart_boundary.py
 
       - name: Analyze Dart and Flutter code
         if: steps.changes.outputs.code == 'true'
         run: flutter analyze
+
+      - name: Build native core for FFI tests
+        if: steps.changes.outputs.code == 'true'
+        run: cargo build --manifest-path rust/Cargo.toml --locked --release --lib --examples
 
       - name: Run tests
         if: steps.changes.outputs.code == 'true'

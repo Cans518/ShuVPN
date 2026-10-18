@@ -88,13 +88,19 @@ class SettingsPage extends StatelessWidget {
           SettingsRow(
             icon: Icons.alt_route,
             title: '网络连接',
-            subtitle: 'HTTP 与 SOCKS5 代理、Android VPN 服务',
+            subtitle: 'HTTP 与 SOCKS5 代理、VPN 捕获模式',
             onTap: () => context.go('/settings/connection'),
           ),
           SettingsRow(
             icon: Icons.science_outlined,
             title: '实验性选项',
             onTap: () => context.go('/settings/experimental'),
+          ),
+          SettingsRow(
+            icon: Icons.rule,
+            title: '规则分流',
+            subtitle: '配置档、策略组、规则预览与回退',
+            onTap: () => context.go('/settings/routing'),
           ),
           // 「实验性选项」「日志」「关于ShuVPN」三行不带副标题：副标题写的是
           // 「里面有几件事」，而这三行各自只有一件事，再写一行只是复述。

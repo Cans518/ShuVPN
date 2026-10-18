@@ -32,3 +32,10 @@ gradlew text eol=lf
 # 锁文件与生成物不参与 diff 折叠统计（它们本来就不该被人工阅读）。
 pubspec.lock linguist-generated=true
 *.lock       linguist-generated=true
+
+# 生成绑定保留生成器格式；第三方许可证保留上游原文。
+/lib/core/rust/generated/** linguist-generated=true -whitespace
+/rust/src/frb_generated.rs linguist-generated=true -whitespace
+/assets/fonts/OFL.txt -whitespace
+/linux/third_party/system_tray/LICENSE -whitespace
+/windows/third_party/system_tray/LICENSE -whitespace

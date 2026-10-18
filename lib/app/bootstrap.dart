@@ -1,10 +1,24 @@
-import 'package:flutter/material.dart';
+import 'dart:io';
 
-import '../core/settings/settings_schema.dart';
+import 'package:flutter/material.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
+import '../core/logging/shu_log.dart';
+import '../core/rust/rust_core.dart';
+import '../core/rust/rust_account_center.dart';
+import '../core/rust/rust_settings_store.dart';
+import '../core/rust/rust_connection.dart';
+import '../core/rust/rust_desktop_tun.dart';
+import '../core/rust/routing_service.dart';
+import '../core/rust/generated/api/system_proxy.dart' as system_proxy;
+import '../core/rust/generated/connection/model.dart' as core;
 import '../core/settings/settings_store.dart';
 import 'app.dart';
 import 'shu_launch_surface.dart';
 import 'theme.dart';
+import '../core/desktop/desktop_port.dart';
+import 'desktop_frame.dart';
 
 /// 启动外壳：**先把第一帧画出来，再去读设置**。
 ///
@@ -28,10 +42,16 @@ class ShuVpnBootstrap extends StatefulWidget {
   const ShuVpnBootstrap({
     super.key,
     this.minimumSplash = const Duration(milliseconds: 700),
+    this.initializeCore,
+    this.desktopPort,
   });
 
   /// 启动页至少停留多久。
   final Duration minimumSplash;
+
+  /// 可注入的核心启动前置过程；Rust 初始化与健康检查仍须完成。
+  final Future<void> Function()? initializeCore;
+  final DesktopPort? desktopPort;
 
   @override
   State<ShuVpnBootstrap> createState() => _ShuVpnBootstrapState();
@@ -40,6 +60,12 @@ class ShuVpnBootstrap extends StatefulWidget {
 class _ShuVpnBootstrapState extends State<ShuVpnBootstrap> {
   SettingsStore? _settings;
   Object? _error;
+  RoutingService? _routing;
+  RustAccountCenter? _account;
+  RustSettingsStore? _nativeSettings;
+  RustConnectionBackend? _connections;
+  bool _systemProxyAvailable = false;
+  String? _systemProxyUnavailableReason;
 
   @override
   void initState() {
@@ -50,11 +76,67 @@ class _ShuVpnBootstrapState extends State<ShuVpnBootstrap> {
   Future<void> _start() async {
     final startedAt = DateTime.now();
     try {
-      final settings = await SettingsStore.load();
-      // 模式迁移必须在任何设置被读取之前跑完，否则读到的是上一个版本的语义。
-      // 它只碰 `settings.` 与 `app.` 开头的键 —— 统一身份认证的会话
-      // （`auth.`）不在其中，升级版本不会把人登出。
-      await ShuSettingsStore(settings.preferences).migrateIfNeeded();
+      final preferences = await SharedPreferences.getInstance();
+      SettingsStore settings;
+      final initializeCore = widget.initializeCore;
+      if (initializeCore != null) {
+        await initializeCore();
+      }
+      if (!Platform.isWindows && !Platform.isLinux) {
+        throw UnsupportedError('ShuVPN 仅支持 Windows 与 Linux');
+      }
+      final coreVersion = await RustCore.initialize();
+      final support = await getApplicationSupportDirectory();
+      final proxyDirectory = '${support.path}${Platform.pathSeparator}network';
+      final connections = RustConnectionBackend(
+        systemProxyDirectory: proxyDirectory,
+      );
+      _connections = connections;
+      await connections.initialize();
+      if (!mounted) {
+        connections.dispose();
+        return;
+      }
+      final nativeSettings = await RustSettingsStore.open(
+        '${support.path}${Platform.pathSeparator}settings',
+        preferences,
+      );
+      if (!mounted) {
+        nativeSettings.dispose();
+        return;
+      }
+      _nativeSettings = nativeSettings;
+      settings = nativeSettings;
+      ShuLog.i('core', 'Rust 核心已初始化 · 版本 $coreVersion');
+      try {
+        await system_proxy.recoverSystemProxy(directory: proxyDirectory);
+      } on core.VpnFailure catch (failure) {
+        throw StateError(failure.message);
+      }
+      try {
+        await system_proxy.systemProxyBackend();
+        _systemProxyAvailable = true;
+      } on core.VpnFailure catch (failure) {
+        _systemProxyUnavailableReason = failure.message;
+      }
+      final routing = await RoutingService.open(
+        '${support.path}${Platform.pathSeparator}rules',
+      );
+      if (!mounted) {
+        routing.dispose();
+        return;
+      }
+      _routing = routing;
+      connections.bindRoutingManager(routing.manager);
+      final account = await RustAccountCenter.open(
+        '${support.path}${Platform.pathSeparator}auth',
+        preferences,
+      );
+      if (!mounted) {
+        account.dispose();
+        return;
+      }
+      _account = account;
       final remaining =
           widget.minimumSplash - DateTime.now().difference(startedAt);
       if (remaining > Duration.zero) {
@@ -63,28 +145,61 @@ class _ShuVpnBootstrapState extends State<ShuVpnBootstrap> {
       if (!mounted) return;
       setState(() => _settings = settings);
     } on Object catch (error) {
-      // 起不来的原因只剩「读不到设置」这一种。它是致命的：没有设置就没有
-      // 主题、没有端点、也没有 `welcomeCompleted`，硬往下走只会到处报错。
-      // 所以这里停下来说清楚，而不是带着一堆 null 继续。
+      _connections?.dispose();
+      _connections = null;
+      _account?.dispose();
+      _account = null;
+      _routing?.dispose();
+      _routing = null;
+      _nativeSettings?.dispose();
+      _nativeSettings = null;
+      ShuLog.e('app', '启动失败 · $error');
       if (!mounted) return;
       setState(() => _error = error);
     }
   }
 
   @override
+  void dispose() {
+    _connections?.dispose();
+    _account?.dispose();
+    _routing?.dispose();
+    _nativeSettings?.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     final settings = _settings;
-    if (settings != null) return ShuVpnApp(settings: settings);
+    final account = _account;
+    if (settings != null && account != null) {
+      return ShuVpnApp(
+        settings: settings,
+        accountCenter: account,
+        nativeConnectionBackend: _connections,
+        routingService: _routing,
+        desktopTunPlatform: const RustDesktopTunPlatform(),
+        desktopPort: widget.desktopPort,
+        systemProxyAvailable: _systemProxyAvailable,
+        systemProxyUnavailableReason: _systemProxyUnavailableReason,
+      );
+    }
 
     // 启动页也要有主题：`ShuLaunchSurface` 的底色与图标取自
     // [ShuYoColors]，而 `themeMode: system` 让它在系统深色下自动换成深色
-    // 那一套 —— 与 Android 原生启动图的 `-night` 资源对得上。
+    // 那一套。
     return MaterialApp(
       title: 'ShuVPN',
       debugShowCheckedModeBanner: false,
       theme: buildShuTheme(Brightness.light),
       darkTheme: buildShuTheme(Brightness.dark),
       themeMode: ThemeMode.system,
+      builder: (context, child) {
+        final port = widget.desktopPort;
+        return port == null
+            ? child ?? const SizedBox.shrink()
+            : DesktopFrame(port: port, child: child ?? const SizedBox.shrink());
+      },
       home: _error == null
           ? const ShuLaunchSurface()
           : _BootstrapError(error: '$_error'),
@@ -92,10 +207,7 @@ class _ShuVpnBootstrapState extends State<ShuVpnBootstrap> {
   }
 }
 
-/// 「设置读不出来」那一屏。
-///
-/// 语气与日志一致（见 `shu_log.dart`）：陈述发生了什么，不喊，也不给一个
-/// 点了没用的「重试」按钮 —— 这里能重试的动作用户本来就做不了（要重开应用）。
+/// 设置或核心初始化失败时的启动页。
 class _BootstrapError extends StatelessWidget {
   const _BootstrapError({required this.error});
 
@@ -112,7 +224,7 @@ class _BootstrapError extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              '无法读取设置',
+              '无法启动应用',
               style: TextStyle(
                 color: colors.textPrimary,
                 fontSize: 20,

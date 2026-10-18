@@ -130,7 +130,10 @@ class ShuAnnouncementDetail {
     this.dateText = '',
     this.publishedAt,
     this.author = '',
+    this.previewText,
   });
+
+  final String? previewText;
 
   final String title;
   final Uri url;
@@ -151,6 +154,8 @@ class ShuAnnouncementDetail {
   /// 摘到 [previewLength] 个字为止，超过就截断加省略号。图片与表格不贡献文字：
   /// 它们是图不是话，放进两行的预览里只会让开头变成一句没头没尾的话。
   String get preview {
+    final supplied = previewText;
+    if (supplied != null) return supplied;
     final buffer = StringBuffer();
     for (final block in blocks) {
       if (block is! ShuAnnouncementText) continue;

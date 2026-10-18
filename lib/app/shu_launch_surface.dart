@@ -4,22 +4,11 @@ import 'theme.dart';
 
 /// 应用的第一屏：**底色 + 居中的图标**，没有文字、没有指示器。
 ///
-/// 与 `ShuYo` 的 `ShuYoLaunchSurface` 同一形态。它只承担一件事 —— 把
-/// 「应用已经起来了」这件事在 Flutter 引擎画第一帧的同时就说清楚。此前
-/// 这一段是空白：`main()` 先把设置读完才 `runApp`，而那之前屏幕上只有
-/// Android 的原生启动图（一块纯色）。
-///
-/// 图标**不旋转、不呼吸、不淡入**。启动通常只有几百毫秒，给这么短的一瞬
-/// 加动效，用户看到的是一个跳动了一半的图形；静止的图标读起来是「在等」，
-/// 动的图标读起来是「卡住了」。
-///
-/// 取色走当前主题的 [ShuYoColors]（调用方把它放进 `MaterialApp` 即可），
-/// 所以浅色下是纸白底 + 蓝色图标、深色下是近黑底 + 白色图标，与 Android
-/// 原生启动图那一对完全对得上 —— 中间不会有一下颜色突变。
+/// 第一帧显示静止的应用图标，颜色跟随当前主题。
 class ShuLaunchSurface extends StatelessWidget {
   const ShuLaunchSurface({super.key});
 
-  /// 图标边长（dp）。与原生那一份 `launch_background.xml` 里的 112dp 相同。
+  /// 图标边长（逻辑像素）。
   static const double iconSize = 112;
 
   @override

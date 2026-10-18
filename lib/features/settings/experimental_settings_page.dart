@@ -7,6 +7,7 @@ import '../../core/connection/connection_controller.dart';
 import '../../core/settings/settings_store.dart';
 import '../../widgets/settings_rows.dart';
 import '../../widgets/settings_scaffold.dart';
+import '../../widgets/settings_save.dart';
 import '../../widgets/shu_surfaces.dart';
 
 /// 「实验性选项」。
@@ -37,7 +38,12 @@ class ShuExperimentalSettingsPage extends StatelessWidget {
           subtitle: settings.vpnTcpWindowScaling ? '1 MiB' : '64 KB',
           value: settings.vpnTcpWindowScaling,
           enabled: !locked,
-          onChanged: (value) => settings.vpnTcpWindowScaling = value,
+          onChanged: (value) => saveShuSetting(
+            context,
+            settings,
+            SettingKey.vpnTcpWindowScaling,
+            value,
+          ),
         ),
         const ShuSettingsNote(
           '只影响系统 VPN 那一半：它的 TCP 由本机终结器逐流接管，'
@@ -82,7 +88,15 @@ class ShuExperimentalSettingsPage extends StatelessWidget {
     );
     if (confirmed != true || !context.mounted) return;
     // 写标记必须在 `go` 之前：路由的重定向会读它。
-    settings.welcomeCompleted = false;
+    if (!await saveShuSetting(
+          context,
+          settings,
+          SettingKey.welcomeCompleted,
+          false,
+        ) ||
+        !context.mounted) {
+      return;
+    }
     context.go(shuWelcomePath);
   }
 }

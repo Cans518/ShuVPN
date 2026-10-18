@@ -1,91 +1,19 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
-import '../../app/shuyo_text_styles.dart';
-import '../../app/theme.dart';
 import '../../core/connection/connection_controller.dart';
 import '../../core/connection/proxy_listen.dart';
 import '../../core/settings/settings_store.dart';
+import '../../widgets/settings_save.dart';
 import '../../widgets/settings_rows.dart';
 import '../../widgets/settings_scaffold.dart';
 import '../../widgets/shu_surfaces.dart';
 
-/// 「网络连接」。
+/// 桌面网络设置：HTTP/SOCKS5 代理、系统代理与校园分流。
 ///
-/// 这一页回答的是「本机把流量交给谁」—— 与「连哪台网关」无关，后者在
-/// aTrust 协议那一页。两者分开是因为它们改变的时机不同：网关是登录时就
-/// 定下来、很少动的东西；下面这三条数据面则是接上隧道之后马上要用的。
-///
-/// ## 三条数据面
-///
-/// | 数据面 | 消费者 | 平台 |
-/// | :--- | :--- | :--- |
-/// | 本机 HTTP 代理 | 只会 HTTPS 代理的应用 / 系统代理 | 全平台 |
-/// | 本机 SOCKS5 代理 | 自己支持 SOCKS5 的应用 | 全平台 |
-/// | Android VPN 服务 | 系统 `VpnService`，接管整机 | 仅 Android |
-///
-/// 前两条是用户态的，不向系统要任何权限；第三条要一次系统授权。
-/// 三条**互不依赖**：两个本机代理服务的是「自己会把地址填进去」的那几个
-/// 应用，系统 VPN 单独接管整机。
-///
-/// ## 为什么 HTTP 与 SOCKS5 各有一套开关和监听地址
-///
-/// Android 的系统代理**只支持 HTTP**：设置里的「WLAN → 代理」只有 HTTP
-/// 一个选项。没有任何系统开关能表达「所有应用都用 SOCKS5」—— 把一个应用
-/// 指向 SOCKS5 端口，得到的往往是零个连接：那一侧从来不知道要去连它。
-/// 两个通道的服务对象不同，所以监听范围也是**两条独立的安全边界**：把 HTTP
-/// 开给同网络的设备，不等于也想把 SOCKS5 开出去。
-///
-/// 监听范围是一条安全边界而不是偏好：隧道是「以你的身份进校园网」的东西，
-/// 把入口开给同网段的陌生人等于把校园账号借出去 —— 所以任何非回环取值都要
-/// 在界面上过一道确认（见 `proxy_listen.dart`）。
-///
-/// ## VPN 那一层把 TCP 交给谁
-///
-/// 这一层由**本应用自己**建立（`ShuVpnService`），它把网关资源表展开后的
-/// **全部**网段交给 TUN。
-///
-/// aTrust 的 L3 数据面在 `matchL3Route` 里对 TCP 有一道硬门：
-/// `if (protocol == 'tcp' && !route.enableTcpPrefL3) continue;` —— 网关没有
-/// 逐资源打开这个开关时（SHU 一条都没开），那些 TCP 包会被静默丢弃
-/// （`sendPacket` 返回 false，而 `SangforTunnelRouter` 不看返回值）。而 TUN
-/// 的路由按目的**地址**分流，认不出协议，没法在路由表上把 TCP 摘出去。
-///
-/// 那道门由**逐流**的判断处理：库里的本机终结器（`ATrustTcpTermination`）
-/// 在本机完成握手，再把字节流转进隧道的 TCP 通道。于是 TUN 可以拿走整张
-/// 资源表，而这一层**不设系统代理** —— 它不再把上面那两条本机代理当成自己的
-/// 出口，两个开关各自管各自那一群消费者。
-///
-/// 本应用自己被排除在 VPN 之外（否则隧道传输会自环），所以应用自身的
-/// 流量不经过隧道 —— 登录 SSO 走公网，本来也不需要。
-///
-/// ## 所有目标都走隧道
-///
-/// 代理**没有**「资源外直连」这种兜底：目标不在网关资源表内就是一次明确的
-/// 失败，不会私下从底层网络出去。一个会偷偷直连的代理，在用户看来与
-/// 「隧道坏了但还能上网」完全一样 —— 那是最难发现的一类故障。
-///
-/// ## 为什么开关自己会干活
-///
-/// 「启用 SOCKS5 代理」这类开关不是一个「下次连接时生效」的标记 —— 隧道
-/// 已经起来时拨开关，它当场就把那一层拉起来或停下去。一个只在重连后才生效
-/// 的开关，在用户看来就是「拨了没反应」。
-///
-/// 隧道在跑的时候这一页**整页不可改**（见 [shuSettingsLockedNotice]）：所有
-/// 取值都是建立监听那一刻定下来的，中途改只会得到「界面上写着新值、实际还
-/// 绑在旧值」这种查不出来的不一致。要改就先断开。
-///
-/// ⚠️ 「连接超时」**不在**这一页，在 aTrust 协议页。它是握手超时（认证到
-/// 隧道建好整段），不是网络层的连通性探测 —— 把它摆在端口中间，会让人以为
-/// 它管的是「本机转发的超时」。
-///
-/// 证书固定（TOFU）的入口也**不在**这一页。指纹仍然照常校验（见
-/// `ConnectionController._trustCertificate`），但清除入口撤掉了：它是一次
-/// 没有回退的信任重置，摆在一堆日常设置中间太容易误触。
-///
-/// 尚未稳定的开关曾经放在「实验性选项」那一页。现在那一页只剩「重新走一遍
-/// 新用户引导」一个入口：这一页上的每一项都是**建立监听那一刻**定下来的
-/// 绑定参数，所以运行期整页封住；而引导入口只在按下时被读一次。
+/// 运行期间锁定监听和接管参数，断开后才允许修改。
 class ShuConnectionSettingsPage extends StatefulWidget {
   const ShuConnectionSettingsPage({super.key});
 
@@ -122,11 +50,12 @@ class _ShuConnectionSettingsPageState extends State<ShuConnectionSettingsPage> {
   @override
   void initState() {
     super.initState();
-    // 授权可能在系统设置里被手动取消，所以每次进入都重问一次，
-    // 而不是缓存一个值。
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      context.read<ConnectionController>().refreshVpnPermission();
+      final connection = context.read<ConnectionController>();
+      if (connection.desktopProxySettingsVisible) {
+        unawaited(connection.refreshDesktopTun());
+      }
     });
   }
 
@@ -137,20 +66,46 @@ class _ShuConnectionSettingsPageState extends State<ShuConnectionSettingsPage> {
     // 隧道在跑时整页封住。判据是 `tunnelUp` 而不是某个数据面的运行标志：
     // VPN 没开、只有代理在跑时，改 DNS / MTU 同样没有意义 —— 那些值要等
     // 下一次建接口才被读。授权状态那一行例外（见下）：它是只读的观测。
-    final locked = connection.tunnelUp;
+    final locked = connection.tunnelUp || connection.cleanupPending;
     final editable = !locked && !connection.busy;
-    // 授权状态这一行要说的那句话，与引导页第 1 页共用（见
-    // `shuVpnPermissionStatus`）：同一件事在两个页面上不能有第二种读法。
-    final status = shuVpnPermissionStatus(
-      context,
-      supported: connection.vpnSupported,
-      prepared: connection.vpnPrepared,
-    );
-
     return ShuSettingsSubPage(
       title: '网络连接',
       banner: locked ? const ShuNoticeBar(shuSettingsLockedNotice) : null,
       children: [
+        if (connection.desktopProxySettingsVisible) ...[
+          const SectionHeader(title: '桌面系统代理'),
+          SettingsSwitchRow(
+            icon: Icons.desktop_windows_outlined,
+            title: '连接时启用系统代理',
+            value: settings.systemProxyEnabled,
+            enabled:
+                editable &&
+                (connection.systemProxyAvailable ||
+                    settings.systemProxyEnabled),
+            onChanged: (value) => saveShuSetting(
+              context,
+              settings,
+              SettingKey.systemProxyEnabled,
+              value,
+            ),
+          ),
+          SettingsRow(
+            icon: Icons.info_outline,
+            title: '系统代理状态',
+            value: connection.systemProxyRecoveryError != null
+                ? '恢复失败'
+                : connection.systemProxyRunning
+                ? '已启用'
+                : connection.systemProxyAvailable
+                ? '未启用'
+                : '当前桌面不支持',
+            subtitle:
+                connection.systemProxyRecoveryError ??
+                (connection.systemProxyAvailable
+                    ? '仅支持系统代理的应用会使用此连接；断开后恢复原设置'
+                    : connection.systemProxyUnavailableReason),
+          ),
+        ],
         for (final channel in _ProxyChannel.values) ...[
           SectionHeader(title: '${channel.label} 代理'),
           SettingsSwitchRow(
@@ -177,28 +132,82 @@ class _ShuConnectionSettingsPageState extends State<ShuConnectionSettingsPage> {
           ),
         ],
 
-        const SectionHeader(title: 'Android VPN 服务'),
-        SettingsSwitchRow(
-          icon: Icons.vpn_lock_outlined,
-          title: '启用 VPN 服务',
-          value: settings.vpnEnabled,
-          enabled: editable,
-          onChanged: (value) => _toggleVpn(settings, connection, value),
-        ),
-        SettingsRow(
-          icon: Icons.verified_user_outlined,
-          title: '系统授权状态',
-          value: status.text,
-          valueColor: status.color,
-          // 未连接时点它可以补一次授权（授权也可以在系统设置里被撤销，
-          // 所以这一行是只读观测 + 一个重新询问的入口）。隧道跑起来之后
-          // 连它也封住 —— 这一页在运行期「整页不可改」是一条不打折的
-          // 规则，留一个例外只会让人以为别的行说不定也能点。
-          enabled: !locked,
-          onTap: connection.vpnSupported && !locked
-              ? () => _requestPermission(connection)
-              : null,
-        ),
+        if (connection.desktopProxySettingsVisible) ...[
+          const SectionHeader(title: '桌面 VPN'),
+          SettingsSwitchRow(
+            icon: Icons.vpn_lock_outlined,
+            title: '连接时启用 VPN',
+            value: settings.vpnEnabled,
+            enabled:
+                editable && (connection.vpnSupported || settings.vpnEnabled),
+            onChanged: (value) => _toggleVpn(settings, connection, value),
+          ),
+          SettingsRow(
+            icon: Icons.filter_alt_outlined,
+            title: 'VPN 捕获模式',
+            value: _captureLabel(settings.vpnCaptureMode),
+            subtitle: '断开后可修改；完整捕获仍按规则选择校园、直连或拒绝',
+            enabled: editable,
+            onTap: () => _chooseCaptureMode(settings),
+          ),
+          SettingsRow(
+            icon: Icons.info_outline,
+            title: 'VPN 状态',
+            value: connection.desktopTunInspecting
+                ? '读取中'
+                : connection.cleanupPending
+                ? '待清理'
+                : connection.vpnRunning
+                ? _captureLabel(connection.desktopTunStatus.captureMode)
+                : connection.vpnSupported
+                ? '未启用'
+                : '暂不可用',
+            subtitle:
+                connection.desktopTunError ??
+                connection.desktopTunEnvironment?.reason ??
+                '校园分流仅接管校园目标；完整捕获接管可路由单播并转发 DNS',
+          ),
+          SettingsRow(
+            icon: Icons.lan_outlined,
+            title: '本次底层网络',
+            value: connection.desktopPhysicalInterface.isEmpty
+                ? '自动选择'
+                : connection.desktopPhysicalInterface,
+            subtitle: '自动模式使用系统默认出口；关闭应用后恢复自动',
+            enabled: editable && !connection.desktopTunInspecting,
+            onTap: () => _chooseDesktopInterface(connection),
+          ),
+          SettingsRow(
+            icon: Icons.refresh,
+            title: '刷新网络与权限',
+            value: connection.desktopTunInspecting ? '读取中' : null,
+            enabled: !connection.desktopTunInspecting && !connection.busy,
+            onTap: () => connection.refreshDesktopTun(),
+          ),
+          SettingsRow(
+            icon: Icons.dns_outlined,
+            title: '本次 DNS 上游',
+            value: connection.desktopPhysicalDns.isEmpty
+                ? '自动读取'
+                : connection.desktopPhysicalDns,
+            subtitle: '底层网络只有本地 DNS 代理时，请填明确上游 IP；关闭应用后恢复自动',
+            enabled: editable,
+            onTap: () => _chooseDesktopDns(connection),
+          ),
+          SettingsRow(
+            icon: Icons.route_outlined,
+            title: '查看接管计划',
+            value: connection.desktopTunPreviewLoading ? '准备中' : null,
+            subtitle: connection.tunnelUp
+                ? '查看原生确认的模式、初始路由与排除地址；运行中显示当前计划'
+                : '连接校园账户通道后可查看',
+            enabled:
+                connection.tunnelUp &&
+                !connection.desktopTunPreviewLoading &&
+                !connection.busy,
+            onTap: () => _showDesktopPlan(connection),
+          ),
+        ],
         SettingsRow(
           icon: Icons.straighten,
           title: 'MTU',
@@ -206,17 +215,119 @@ class _ShuConnectionSettingsPageState extends State<ShuConnectionSettingsPage> {
           enabled: editable,
           onTap: () => _pickMtu(settings),
         ),
-        SettingsRow(
-          icon: Icons.dns_outlined,
-          title: 'DNS',
-          // 留空 = 用底层网络那一组（原生侧会自己从系统取，并在 API 33+
-          // 把它们排除在隧道之外）。不指网关下发的那一组：那些是内网
-          // 地址，在底层网络里不可达。
-          value: settings.vpnDns.isEmpty ? '跟随系统' : settings.vpnDns,
-          enabled: editable,
-          onTap: () => _pickDns(settings),
+      ],
+    );
+  }
+
+  static String _captureLabel(CaptureMode mode) => switch (mode) {
+    CaptureMode.campus => '校园分流',
+    CaptureMode.full => '完整捕获（实验性）',
+  };
+
+  Future<void> _chooseCaptureMode(SettingsStore settings) async {
+    final next = await showShuChoiceSheet<CaptureMode>(
+      context: context,
+      title: 'VPN 捕获模式',
+      current: settings.vpnCaptureMode,
+      options: const [
+        ShuChoice(CaptureMode.campus, '校园分流', '默认；校园网段及已解析校园域名进入规则，其余流量不受接管'),
+        ShuChoice(
+          CaptureMode.full,
+          '完整捕获（实验性）',
+          'IPv4/IPv6 单播和 DNS 进入规则；保留本机、控制节点、链路本地与组播，网络覆盖变化时停止并恢复',
         ),
       ],
+    );
+    if (next != null && mounted) {
+      final connection = context.read<ConnectionController>();
+      if (connection.busy || connection.tunnelUp || connection.cleanupPending) {
+        return;
+      }
+      await saveShuSetting(
+        context,
+        settings,
+        SettingKey.vpnCaptureMode,
+        next.name,
+      );
+    }
+  }
+
+  Future<void> _chooseDesktopDns(ConnectionController connection) async {
+    final value = await showShuTextPrompt(
+      context: context,
+      title: '本次 DNS 上游',
+      label: '上游 IP，留空自动读取',
+      initial: connection.desktopPhysicalDns,
+      validate: connection.validateDesktopDns,
+    );
+    if (value != null && mounted) connection.selectDesktopDns(value);
+  }
+
+  Future<void> _chooseDesktopInterface(ConnectionController connection) async {
+    final networks = connection.desktopTunEnvironment?.networks ?? const [];
+    final value = await showShuChoiceSheet<String>(
+      context: context,
+      title: '本次底层网络',
+      current: connection.desktopPhysicalInterface,
+      options: [
+        const ShuChoice('', '自动选择', '按当前系统默认出口选择'),
+        for (final network in networks)
+          ShuChoice(
+            network.name,
+            '${network.name}${network.recommended ? " · 系统默认" : ""}',
+            network.description,
+          ),
+      ],
+    );
+    if (value != null && mounted) connection.selectDesktopInterface(value);
+  }
+
+  Future<void> _showDesktopPlan(ConnectionController connection) async {
+    await connection.previewDesktopTun();
+    if (!mounted) return;
+    final preview = connection.desktopTunPreview;
+    if (preview == null) return;
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('VPN 接管计划'),
+        content: SizedBox(
+          width: 520,
+          child: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('捕获模式：${_captureLabel(preview.captureMode)}'),
+                Text('实际 MTU：${preview.mtu}'),
+                Text('虚拟地址：${preview.addresses.join("、")}'),
+                Text(
+                  preview.captureMode == CaptureMode.full
+                      ? 'DNS 接管：启用，校园名称走校园 DNS，其余使用物理上游'
+                      : preview.capturesCampusDns
+                      ? '校园 DNS 映射：启用'
+                      : '校园 DNS 映射：未启用',
+                ),
+                if (preview.physicalDnsServers.isNotEmpty)
+                  Text('物理 DNS 上游：${preview.physicalDnsServers.join("、")}'),
+                if (preview.captureMode == CaptureMode.full)
+                  const Text('不接管本机、控制节点、回环、链路本地、组播及保留广播范围'),
+                if (preview.protectedAddresses.isNotEmpty)
+                  Text('排除地址：${preview.protectedAddresses.join("、")}'),
+                const SizedBox(height: 12),
+                Text('初始接管网段：${preview.routes.length}'),
+                const SizedBox(height: 8),
+                SelectableText(preview.routes.join('\n')),
+              ],
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('关闭'),
+          ),
+        ],
+      ),
     );
   }
 
@@ -231,12 +342,10 @@ class _ShuConnectionSettingsPageState extends State<ShuConnectionSettingsPage> {
     _ProxyChannel channel,
     bool value,
   ) async {
-    switch (channel) {
-      case _ProxyChannel.http:
-        settings.httpProxyEnabled = value;
-      case _ProxyChannel.socks:
-        settings.socksProxyEnabled = value;
-    }
+    final key = channel == _ProxyChannel.http
+        ? SettingKey.httpProxyEnabled
+        : SettingKey.socksProxyEnabled;
+    if (!await saveShuSetting(context, settings, key, value)) return;
     if (!connection.tunnelUp || connection.busy) return;
     if (value) {
       if (channel == _ProxyChannel.http) {
@@ -262,27 +371,30 @@ class _ShuConnectionSettingsPageState extends State<ShuConnectionSettingsPage> {
     ConnectionController connection,
     bool value,
   ) async {
-    if (value && connection.vpnSupported && connection.vpnPrepared != true) {
-      final granted = await connection.requestVpnPermission();
-      if (!mounted) return;
-      if (!granted) {
-        showShuSnack(context, '未授予 VPN 权限，未能启用');
-        return;
-      }
+    if (value &&
+        connection.desktopProxySettingsVisible &&
+        !connection.vpnSupported) {
+      showShuSnack(
+        context,
+        connection.desktopTunEnvironment?.reason ?? '当前不能启动 VPN',
+      );
+      return;
     }
-    settings.vpnEnabled = value;
+    if (!mounted ||
+        !await saveShuSetting(
+          context,
+          settings,
+          SettingKey.vpnEnabled,
+          value,
+        )) {
+      return;
+    }
     if (!connection.tunnelUp || connection.busy) return;
     if (value && !connection.vpnRunning) {
       await connection.startVpn();
-    } else if (!value && connection.vpnRunning) {
+    } else if (!value && (connection.vpnRunning || connection.cleanupPending)) {
       await connection.stopVpn();
     }
-  }
-
-  Future<void> _requestPermission(ConnectionController connection) async {
-    final granted = await connection.requestVpnPermission();
-    if (!mounted) return;
-    showShuSnack(context, granted ? '已获得 VPN 授权' : '未授予 VPN 权限');
   }
 
   /// 填监听地址。
@@ -291,7 +403,7 @@ class _ShuConnectionSettingsPageState extends State<ShuConnectionSettingsPage> {
   /// 「只放行某一张网卡」这种需求；放开之后只想让 USB 网络共享那一台连进来
   /// 也有了写法。代价是错误输入的入口也变宽了，所以两道门都留着：
   ///
-  /// 1. 字面地址校验（在 [ShuProxyListen.parse] 里，对话框上直接报错）；
+  /// 1. 通过原生设置接口校验地址，并在对话框上直接报错；
   /// 2. 任何非回环地址都要过一次确认 —— 隧道是「以你的身份进校园网」的
   ///    东西，把入口开给别的设备等于把校园账号借出去。
   ///
@@ -310,10 +422,10 @@ class _ShuConnectionSettingsPageState extends State<ShuConnectionSettingsPage> {
       label: '绑定地址',
       initial: current.address,
       validate: (raw) =>
-          ShuProxyListen.parse(raw) == null ? '请填一个 IP 地址，例如 127.0.0.1' : null,
+          settings.validationMessage(SettingKey.socksListen, raw),
     );
     if (value == null) return;
-    final next = ShuProxyListen.parse(value);
+    final next = settings.parseListen(value);
     // 对话框已经校过一遍，这里只是让类型收窄 —— 多一道门不亏。
     if (next == null || next == current) return;
     if (!mounted) return;
@@ -323,11 +435,12 @@ class _ShuConnectionSettingsPageState extends State<ShuConnectionSettingsPage> {
       if (confirmed != true) return;
     }
 
-    switch (channel) {
-      case _ProxyChannel.http:
-        settings.httpListen = next;
-      case _ProxyChannel.socks:
-        settings.socksListen = next;
+    final key = channel == _ProxyChannel.http
+        ? SettingKey.httpListen
+        : SettingKey.socksListen;
+    if (!mounted ||
+        !await saveShuSetting(context, settings, key, next.address)) {
+      return;
     }
     if (channel == _ProxyChannel.http) {
       await connection.rebindHttpProxy();
@@ -367,18 +480,20 @@ class _ShuConnectionSettingsPageState extends State<ShuConnectionSettingsPage> {
     _ProxyChannel channel,
   ) async {
     final current = channel.portIn(settings);
-    final port = await showDialog<int>(
+    final key = channel == _ProxyChannel.http
+        ? SettingKey.httpPort
+        : SettingKey.socksPort;
+    final input = await showShuTextPrompt(
       context: context,
-      builder: (_) =>
-          _PortDialog(title: '${channel.label} 端口', initial: current),
+      title: '${channel.label} 端口',
+      label: '端口',
+      initial: '$current',
+      validate: (raw) =>
+          settings.validationMessage(key, int.tryParse(raw) ?? raw),
     );
+    final port = input == null ? null : int.tryParse(input);
     if (port == null || port == current) return;
-    switch (channel) {
-      case _ProxyChannel.http:
-        settings.httpPort = port;
-      case _ProxyChannel.socks:
-        settings.socksPort = port;
-    }
+    if (!mounted || !await saveShuSetting(context, settings, key, port)) return;
     // 端口和地址一样是绑定参数，改完不重绑就还是旧的 —— 而界面上已经
     // 显示新的了，那种不一致比「没改」更难查。
     if (channel == _ProxyChannel.http) {
@@ -399,113 +514,8 @@ class _ShuConnectionSettingsPageState extends State<ShuConnectionSettingsPage> {
         ShuChoice(1500, '1500', '以太网值，可能被隧道封装撑破'),
       ],
     );
-    if (next != null) settings.vpnMtu = next;
-  }
-
-  Future<void> _pickDns(SettingsStore settings) async {
-    const custom = '__custom__';
-    final choice = await showShuChoiceSheet<String>(
-      context: context,
-      title: 'DNS',
-      current: settings.vpnDns.isEmpty ? '' : custom,
-      options: const [
-        ShuChoice('', '跟随系统', '用底层网络当前的 DNS 服务器'),
-        ShuChoice(custom, '自定义…', '把查询交给隧道里的这一台'),
-      ],
-    );
-    if (choice == null) return;
-    if (choice != custom) {
-      settings.vpnDns = '';
-      return;
+    if (next != null && mounted) {
+      await saveShuSetting(context, settings, SettingKey.vpnMtu, next);
     }
-    if (!mounted) return;
-    final value = await showShuTextPrompt(
-      context: context,
-      title: 'DNS',
-      label: '服务器地址',
-      initial: settings.vpnDns,
-      validate: (value) {
-        if (value.isEmpty) return null;
-        final octets = value.split('.');
-        if (octets.length != 4) return '请填 IPv4 地址';
-        for (final octet in octets) {
-          final parsed = int.tryParse(octet);
-          if (parsed == null || parsed < 0 || parsed > 255) return '请填 IPv4 地址';
-        }
-        return null;
-      },
-    );
-    if (value == null) return;
-    settings.vpnDns = value;
-  }
-}
-
-/// `0` 在这里是一个有含义的取值（自动），所以不能要求「必须填一个端口号」。
-class _PortDialog extends StatefulWidget {
-  const _PortDialog({required this.title, required this.initial});
-
-  /// 「HTTP 端口」/「SOCKS5 端口」—— 两个通道共用同一段 UI，标题必须能变。
-  final String title;
-
-  final int initial;
-
-  @override
-  State<_PortDialog> createState() => _PortDialogState();
-}
-
-class _PortDialogState extends State<_PortDialog> {
-  late final TextEditingController _controller = TextEditingController(
-    text: '${widget.initial}',
-  );
-  String? _error;
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  void _submit() {
-    final value = int.tryParse(_controller.text.trim());
-    if (value == null || value < 0 || value > 65535) {
-      setState(() => _error = '请输入 0–65535 之间的整数');
-      return;
-    }
-    Navigator.of(context).pop(value);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.shuyoColors;
-    return AlertDialog(
-      title: Text(widget.title),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          TextField(
-            controller: _controller,
-            autofocus: true,
-            keyboardType: TextInputType.number,
-            decoration: const InputDecoration(
-              labelText: '端口',
-              border: OutlineInputBorder(),
-            ),
-            onSubmitted: (_) => _submit(),
-          ),
-          if (_error != null) ...[
-            const SizedBox(height: 8),
-            Text(_error!, style: ShuYoTextStyles.meta(color: colors.danger)),
-          ],
-        ],
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: const Text('取消'),
-        ),
-        FilledButton(onPressed: _submit, child: const Text('保存')),
-      ],
-    );
   }
 }

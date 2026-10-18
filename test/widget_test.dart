@@ -5,18 +5,23 @@
 // signed out, so no request is ever issued.
 
 import 'package:flutter/material.dart';
-import 'package:flutter_sangfor/flutter_sangfor.dart';
+import 'package:flutter/services.dart';
+import 'package:shuvpn/core/connection/connection_status.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:shuvpn/app/app.dart';
-import 'package:shuvpn/app/app_info.dart';
 import 'package:shuvpn/app/theme.dart';
+import 'package:shuvpn/app/shuyo_text_styles.dart';
 import 'package:shuvpn/core/auth/auth_constants.dart';
 import 'package:shuvpn/core/connection/connection_controller.dart';
 import 'package:shuvpn/core/connection/protocol.dart';
+import 'package:shuvpn/core/connection/native_tun.dart';
 import 'package:shuvpn/core/logging/shu_log.dart';
 import 'package:shuvpn/core/settings/settings_store.dart';
+
+import 'settings_stub.dart';
+
 import 'package:shuvpn/core/update/shu_update_client.dart';
 import 'package:shuvpn/core/update/shu_update_info.dart';
 import 'package:shuvpn/features/connect/connect_page.dart';
@@ -25,10 +30,12 @@ import 'package:shuvpn/features/settings/experimental_settings_page.dart';
 import 'package:shuvpn/features/settings/log_page.dart';
 import 'package:shuvpn/features/settings/protocol_settings_page.dart';
 import 'package:shuvpn/shell/floating_dock.dart';
+import 'package:shuvpn/shell/dock_shell.dart';
 import 'package:shuvpn/widgets/settings_scaffold.dart';
 import 'package:shuvpn/widgets/shu_app_bar.dart';
 import 'package:shuvpn/widgets/shu_surfaces.dart';
 
+import 'account_stub.dart';
 import 'shu_update_stub.dart';
 
 Future<void> _pumpApp(
@@ -45,7 +52,7 @@ Future<void> _pumpApp(
   addTearDown(tester.view.reset);
 
   SharedPreferences.setMockInitialValues(<String, Object>{});
-  final settings = await SettingsStore.load();
+  final settings = await StubSettingsStore.load();
   // 首启门默认是关着的（全新安装要看到引导），而这一整个文件测的是引导
   // **之后**的界面。模拟一位已经走完引导的用户，比在每个用例里绕过重定向
   // 干净：这层判断正好也是引导唯一的长期痕迹。
@@ -55,6 +62,7 @@ Future<void> _pumpApp(
   await tester.pumpWidget(
     ShuVpnApp(
       settings: settings,
+      accountCenter: StubAccountCenter(),
       updateClient: updateClient ?? StubShuUpdateClient(),
     ),
   );
@@ -187,12 +195,21 @@ class _FakeConnectionController extends ConnectionController {
     super.settings, {
     this.vpnRunning = false,
     this.tunnelUp = false,
+    this.captureMode = CaptureMode.campus,
   });
 
   /// 「系统 VPN 接口建起来了没有」—— 它同时是那一行的状态词与它出不出
   /// 现的半个条件。
   @override
   final bool vpnRunning;
+  final CaptureMode captureMode;
+
+  @override
+  NativeTunSnapshot get desktopTunStatus => NativeTunSnapshot(
+    state: vpnRunning ? 'running' : 'stopped',
+    cleanupPending: false,
+    captureMode: captureMode,
+  );
 
   /// 「隧道在跑」—— 四个设置页的运行期锁定读的是它。
   ///
@@ -201,16 +218,16 @@ class _FakeConnectionController extends ConnectionController {
   @override
   final bool tunnelUp;
 
-  SangforConnectionState _state = SangforConnectionState.disconnected;
+  ConnectionStatus _state = ConnectionStatus.disconnected;
 
   @override
-  SangforConnectionState get state => _state;
+  ConnectionStatus get state => _state;
 
   @override
   String? get virtualAddress =>
-      _state == SangforConnectionState.connected ? '10.95.178.77' : null;
+      _state == ConnectionStatus.connected ? '10.95.178.77' : null;
 
-  void switchTo(SangforConnectionState value) {
+  void switchTo(ConnectionStatus value) {
     _state = value;
     notifyListeners();
   }
@@ -290,6 +307,12 @@ Future<void> _pumpSettingsSubPage(
 }
 
 void main() {
+  setUpAll(() async {
+    final font = FontLoader(ShuYoTextStyles.fontFamily)
+      ..addFont(rootBundle.load('assets/fonts/LXGWWenKaiScreen.ttf'));
+    await font.load();
+  });
+
   // 日志缓冲区是**进程级单例**，跨用例留着会把上一条的现场带进来。
   setUp(ShuLog.instance.clear);
 
@@ -497,7 +520,7 @@ void main() {
     tester,
   ) async {
     SharedPreferences.setMockInitialValues(<String, Object>{});
-    final settings = await SettingsStore.load();
+    final settings = await StubSettingsStore.load();
     // 保护出厂值：三条通道里只有系统 VPN 出厂是开的（安卓上），
     // 那一条恰好是这里要验的「真正在跑的那条」。
     settings.vpnEnabled = true;
@@ -507,7 +530,7 @@ void main() {
     // 先摆成「已连接」再搭页 —— 抽屉必须在**内容已经长成最终那个样子**之后
     // 才拉开：开着的时候容量变一下，它就会被兜底收回去（下一条用例）。
     final controller = _FakeConnectionController(settings, vpnRunning: true)
-      ..switchTo(SangforConnectionState.connected);
+      ..switchTo(ConnectionStatus.connected);
     await _pumpDrawer(tester, settings: settings, controller: controller);
 
     // 连上了：虚拟地址取代了协议名那一行，连接方式整组这才出现。
@@ -516,8 +539,8 @@ void main() {
 
     // 只列**设置里开着**的那一条。没开的两条不是画成灰的，是根本不画 ——
     // 那两条路本来就不会走。
-    expect(find.text('Android VPN 服务'), findsOneWidget);
-    expect(find.text('已启用'), findsOneWidget);
+    expect(find.text('校园分流'), findsOneWidget);
+    expect(find.text('校园分流 · 已启用'), findsOneWidget);
     expect(find.text('HTTP 代理'), findsNothing);
     expect(find.text('SOCKS5 代理'), findsNothing);
     expect(find.byIcon(Icons.content_copy), findsNothing);
@@ -538,11 +561,31 @@ void main() {
     expect(_drawerHeight(tester), closeTo(_drawerContentHeight(tester), 1));
   });
 
+  testWidgets('connection drawer displays the actual native capture mode', (
+    tester,
+  ) async {
+    SharedPreferences.setMockInitialValues(<String, Object>{});
+    final settings = await StubSettingsStore.load();
+    settings.vpnEnabled = true;
+    settings.vpnCaptureMode = CaptureMode.campus;
+    await _pumpDrawer(
+      tester,
+      settings: settings,
+      controller: _FakeConnectionController(
+        settings,
+        vpnRunning: true,
+        captureMode: CaptureMode.full,
+      )..switchTo(ConnectionStatus.connected),
+    );
+    expect(find.text('完整捕获 · 已启用'), findsOneWidget);
+    expect(find.text('校园分流 · 已启用'), findsNothing);
+  });
+
   testWidgets(
     'every open channel gets a row, and its address, once connected',
     (tester) async {
       SharedPreferences.setMockInitialValues(<String, Object>{});
-      final settings = await SettingsStore.load();
+      final settings = await StubSettingsStore.load();
       // 三路全开 —— 内容最长的那一态。
       settings.vpnEnabled = true;
       settings.httpProxyEnabled = true;
@@ -552,24 +595,18 @@ void main() {
         tester,
         settings: settings,
         controller: _FakeConnectionController(settings, vpnRunning: true)
-          ..switchTo(SangforConnectionState.connected),
+          ..switchTo(ConnectionStatus.connected),
       );
 
       expect(find.text('连接方式'), findsOneWidget);
-      for (final row in <String>['HTTP 代理', 'SOCKS5 代理', 'Android VPN 服务']) {
+      for (final row in <String>['HTTP 代理', 'SOCKS5 代理', '校园分流']) {
         expect(find.text(row), findsOneWidget, reason: '$row 开着就应该有一行');
       }
 
       // 两个代理地址是**设置里那个**（出厂回环 + 两个错开的端口），各带一颗
       // 复制按钮 —— 这两行存在的理由就是把地址抄走。
-      expect(
-        find.text('127.0.0.1:${SettingsStore.defaultHttpPort}'),
-        findsOneWidget,
-      );
-      expect(
-        find.text('127.0.0.1:${SettingsStore.defaultSocksPort}'),
-        findsOneWidget,
-      );
+      expect(find.text('127.0.0.1:3322'), findsOneWidget);
+      expect(find.text('127.0.0.1:2233'), findsOneWidget);
       expect(find.byIcon(Icons.content_copy), findsNWidgets(2));
 
       // 内容最多的一态下，抽屉仍然刚好装下它 —— 三行通道全在抽屉里，
@@ -579,7 +616,7 @@ void main() {
           .getRect(find.byKey(ConnectPage.scrimKey))
           .bottom;
       expect(
-        tester.getBottomLeft(find.text('Android VPN 服务')).dy,
+        tester.getBottomLeft(find.text('校园分流')).dy,
         lessThanOrEqualTo(drawerBottom),
         reason: '最后一行不能掉出抽屉外',
       );
@@ -590,7 +627,7 @@ void main() {
     tester,
   ) async {
     SharedPreferences.setMockInitialValues(<String, Object>{});
-    final settings = await SettingsStore.load();
+    final settings = await StubSettingsStore.load();
     settings.vpnEnabled = true;
     // 从「未连接」开始 —— 抽屉的内容只有协议那一段，容量是最小的那一档。
     final controller = _FakeConnectionController(settings);
@@ -613,7 +650,7 @@ void main() {
     );
 
     // 隧道连上：抽屉里多出「连接方式」那几行 —— 它的**容量**变了。
-    controller.switchTo(SangforConnectionState.connected);
+    controller.switchTo(ConnectionStatus.connected);
     await tester.pumpAndSettle();
 
     expect(find.text('连接方式'), findsOneWidget, reason: '内容确实变了');
@@ -643,11 +680,31 @@ void main() {
 
     // 反方向也一样。断开让内容变短：不收回去的话，控制器会把当前位置直接
     // 夹到新的（更小的）上限，抽屉当着用户的面往下跳一格。
-    controller.switchTo(SangforConnectionState.disconnected);
+    controller.switchTo(ConnectionStatus.disconnected);
     await tester.pumpAndSettle();
     expect(find.text('连接方式'), findsNothing, reason: '内容确实变短了');
     expect(_drawerHeight(tester), closeTo(collapsed, 1), reason: '容量变小同样要收回去');
   });
+
+  for (final dpr in [1.0, 2.0]) {
+    testWidgets('opaque dock reserves body space at DPR $dpr', (tester) async {
+      await _pumpApp(tester, physical: Size(1024 * dpr, 768 * dpr), dpr: dpr);
+      await tester.pumpAndSettle();
+      for (final label in ['服务', '设置', '连接']) {
+        await _openTab(tester, label);
+        final shell = tester.widget<DockShell>(find.byType(DockShell));
+        final body = tester.getRect(find.byWidget(shell.navigationShell));
+        final dock = tester.getRect(find.byType(FloatingDock));
+        expect(
+          body.bottom,
+          closeTo(dock.top, 0.01),
+          reason: 'The opaque navigation owns its space instead of covering the body.',
+        );
+        expect(dock.height, closeTo(ShuSpacing.dockHeight, 0.01));
+        expect(dock.bottom, closeTo(768, 0.01));
+      }
+    });
+  }
 
   testWidgets('the dock switches between the three destinations', (
     tester,
@@ -709,7 +766,7 @@ void main() {
     // what is behind the row); the value is what it deliberately does not have
     // (that would make the whole page repaint whenever a setting changed).
     expect(find.text('主题风格、配色切换'), findsOneWidget);
-    expect(find.text('HTTP 与 SOCKS5 代理、Android VPN 服务'), findsOneWidget);
+    expect(find.text('HTTP 与 SOCKS5 代理、VPN 捕获模式'), findsOneWidget);
     expect(find.byType(ShuCard), findsNothing);
     expect(find.byType(SectionHeader), findsNothing);
     expect(find.byType(SwitchListTile), findsNothing);
@@ -770,15 +827,8 @@ void main() {
     // —— 更新源是 GitHub 上的 APK 发布，而测试环境的默认平台就是安卓。
     expect(find.text('项目信息'), findsOneWidget);
     expect(find.text('隐私与声明'), findsOneWidget);
-    expect(find.text('支持'), findsOneWidget);
-    for (final entry in <String>[
-      '源代码',
-      '开源许可',
-      '第三方开源许可',
-      '贡献者',
-      '权限说明',
-      '检查更新',
-    ]) {
+    expect(find.text('支持'), findsNothing);
+    for (final entry in <String>['源代码', '开源许可', '第三方开源许可', '贡献者', '权限说明']) {
       expect(find.text(entry), findsOneWidget, reason: '$entry 应该有一行');
     }
     // The licence row states the licence but goes nowhere, so it is the only
@@ -794,7 +844,7 @@ void main() {
       findsNothing,
     );
     // Every remaining row opens something, so none of them may be a dead end.
-    expect(find.byIcon(Icons.chevron_right), findsNWidgets(5));
+    expect(find.byIcon(Icons.chevron_right), findsNWidgets(4));
     // The mark is the launcher tile itself, not an icon-font glyph — the
     // rounded square plus its shadow only reads as an app icon with the opaque
     // blue tile behind the white mark.
@@ -807,7 +857,9 @@ void main() {
     );
   });
 
-  testWidgets('the update row exists on Android only', (tester) async {
+  testWidgets('candidate desktop builds keep automatic updates disabled', (
+    tester,
+  ) async {
     // 测试环境的默认平台就是安卓，所以换一个平台才看得到「它不出现」。
     // 用 variant 而不是 `addTearDown` 复位：框架把「调试变量被改过」当成
     // 用例失败，而它在 tearDown 之前就检查了。
@@ -816,15 +868,16 @@ void main() {
 
     expect(find.text('支持'), findsNothing);
     expect(find.text('检查更新'), findsNothing);
-  }, variant: TargetPlatformVariant.only(TargetPlatform.iOS));
+  }, variant: TargetPlatformVariant.only(TargetPlatform.windows));
 
-  testWidgets('a newer release opens the update prompt as the shell comes up', (
+  testWidgets('candidate desktop startup does not query the release channel', (
     tester,
   ) async {
     final client = StubShuUpdateClient(
       result: const ShuUpdateInfo(
         latestVersion: '99.0.0',
-        downloadUrl: 'https://example.com/ShuVPN.apk',
+        downloadUrl: 'https://example.com/ShuVPN-windows-x64.zip',
+        targetUrl: 'https://example.com/ShuVPN-windows-x64.zip',
         releasePageUrl: 'https://example.com/releases',
       ),
     );
@@ -832,11 +885,9 @@ void main() {
     await _pumpApp(tester, updateClient: client);
     await tester.pumpAndSettle();
 
-    expect(find.text('发现新版本'), findsOneWidget);
-    expect(find.text('当前版本：${ShuAppInfo.version}'), findsOneWidget);
-    expect(find.text('最新版本：99.0.0'), findsOneWidget);
+    expect(find.text('发现新版本'), findsNothing);
     // 拿来比对的必须是应用自己的版本，不能是某个写死的数。
-    expect(client.requestedVersions, <String>[ShuAppInfo.version]);
+    expect(client.requestedVersions, isEmpty);
   });
 
   testWidgets('the startup check says nothing when there is no newer release', (
@@ -848,7 +899,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('发现新版本'), findsNothing);
-    expect(client.requestedVersions, <String>[ShuAppInfo.version]);
+    expect(client.requestedVersions, isEmpty);
   });
 
   testWidgets('the permission page lists what the app actually asks for', (
@@ -867,84 +918,77 @@ void main() {
     await tester.tap(find.text('权限说明'));
     await tester.pumpAndSettle();
 
-    for (final entry in <String>['VPN 服务', '通知', '网络访问']) {
+    for (final entry in <String>['VPN 权限', '网络访问']) {
       expect(find.text(entry), findsOneWidget, reason: '$entry 应该有一行');
     }
   });
 
-  testWidgets(
-    'the network page is HTTP, SOCKS5, Android VPN — and nothing else',
-    (tester) async {
-      await _pumpApp(tester);
-      await _openSettings(tester, '网络连接');
+  testWidgets('proxy-only test backend exposes HTTP and SOCKS5 settings', (
+    tester,
+  ) async {
+    await _pumpApp(tester);
+    await _openSettings(tester, '网络连接');
 
-      for (final label in <String>[
-        'HTTP 代理',
-        '启用 HTTP 代理',
-        'HTTP 监听地址',
-        'HTTP 代理端口',
-        'SOCKS5 代理',
-        '启用 SOCKS5 代理',
-        'SOCKS5 监听地址',
-        'SOCKS5 代理端口',
-        'Android VPN 服务',
-        '启用 VPN 服务',
-        '系统授权状态',
-        'MTU',
-        'DNS',
-      ]) {
-        expect(find.text(label), findsOneWidget, reason: '$label 应该在这一页上');
-      }
+    for (final label in <String>[
+      'HTTP 代理',
+      '启用 HTTP 代理',
+      'HTTP 监听地址',
+      'HTTP 代理端口',
+      'SOCKS5 代理',
+      '启用 SOCKS5 代理',
+      'SOCKS5 监听地址',
+      'SOCKS5 代理端口',
+      'MTU',
+    ]) {
+      expect(find.text(label), findsOneWidget, reason: '$label 应该在这一页上');
+    }
 
-      // 撤掉的东西：没有直连兜底、没有证书固定、没有运行期统计行，
-      // 也没有 TCP-over-L3 实验开关（那件事已经有结论，开关连同页面入口
-      // 一起撤了）。
-      for (final gone in <String>[
-        '资源外直连',
-        '证书固定',
-        '已固定的主机',
-        '清除全部指纹',
-        '运行状态',
-        '目标分流',
-        'L3 路由',
-        '流量计数',
-        '连接超时',
-        'TCP 走 L3',
-      ]) {
-        expect(find.text(gone), findsNothing, reason: '$gone 不该在这一页上');
-      }
+    // 撤掉的东西：没有直连兜底、没有证书固定、没有运行期统计行，
+    // 也没有 TCP-over-L3 实验开关（那件事已经有结论，开关连同页面入口
+    // 一起撤了）。
+    for (final gone in <String>[
+      '资源外直连',
+      '证书固定',
+      '已固定的主机',
+      '清除全部指纹',
+      '运行状态',
+      '目标分流',
+      'L3 路由',
+      '流量计数',
+      '连接超时',
+      'TCP 走 L3',
+    ]) {
+      expect(find.text(gone), findsNothing, reason: '$gone 不该在这一页上');
+    }
 
-      // The gateway-facing timeout belongs to the aTrust page, not here.
-      expect(find.text('连接超时'), findsNothing);
-      // No explanatory prose: every row is a setting, not a paragraph.
-      expect(find.byType(ShuSettingsNote), findsNothing);
-      expect(find.byType(ShuSettingsWarning), findsNothing);
+    // The gateway-facing timeout belongs to the aTrust page, not here.
+    expect(find.text('连接超时'), findsNothing);
+    // No explanatory prose: every row is a setting, not a paragraph.
+    expect(find.byType(ShuSettingsNote), findsNothing);
+    expect(find.byType(ShuSettingsWarning), findsNothing);
 
-      // Out-of-the-box values: 2233 / 3322, loopback only, MTU 1400, gateway DNS.
-      // 两个端口错开是硬要求：它们可以同时开着，撞在一起时第二个绑不上。
-      expect(find.text('3322'), findsOneWidget);
-      expect(find.text('2233'), findsOneWidget);
-      // 监听地址行直接写绑定地址：两个通道各一行，所以一共两个。
-      expect(find.text('127.0.0.1'), findsNWidgets(2));
-      expect(find.text('1400'), findsOneWidget);
-      expect(find.text('跟随系统'), findsOneWidget);
+    // Out-of-the-box values: 2233 / 3322, loopback only, MTU 1400, gateway DNS.
+    // 两个端口错开是硬要求：它们可以同时开着，撞在一起时第二个绑不上。
+    expect(find.text('3322'), findsOneWidget);
+    expect(find.text('2233'), findsOneWidget);
+    // 监听地址行直接写绑定地址：两个通道各一行，所以一共两个。
+    expect(find.text('127.0.0.1'), findsNWidgets(2));
+    expect(find.text('1400'), findsOneWidget);
 
-      // Three switches: the two proxies are off by default, the system VPN is on.
-      final switches = tester
-          .widgetList<SwitchListTile>(find.byType(SwitchListTile))
-          .toList();
-      expect(switches, hasLength(3));
-      expect(switches[0].value, isFalse, reason: 'HTTP 代理出厂关闭');
-      expect(switches[1].value, isFalse, reason: 'SOCKS5 代理出厂关闭');
-      expect(switches[2].value, isTrue, reason: 'Android VPN 出厂开启');
-    },
-  );
+    // Three switches: the two proxies are off by default, the system VPN is on.
+    final switches = tester
+        .widgetList<SwitchListTile>(find.byType(SwitchListTile))
+        .toList();
+    expect(switches, hasLength(2));
+    expect(switches[0].value, isFalse, reason: 'HTTP 代理出厂关闭');
+    expect(switches[1].value, isFalse, reason: 'SOCKS5 代理出厂关闭');
+  });
 
   testWidgets('the five runtime-locked pages freeze while the tunnel is up', (
     tester,
   ) async {
     SharedPreferences.setMockInitialValues(<String, Object>{});
-    final settings = await SettingsStore.load();
+    final settings = await StubSettingsStore.load();
     final pages = <String, Widget>{
       'aTrust 协议': const ShuATrustSettingsPage(),
       'EasyConnect 协议': const ShuEasyConnectSettingsPage(),
@@ -1032,12 +1076,12 @@ void main() {
   testWidgets('a sealed switch shows it is sealed, even when it is on', (
     tester,
   ) async {
-    // 运行期锁定会封住**开着**的开关（「启用 VPN 服务」出厂就是开的）。
+    // 运行期锁定也必须封住已经打开的代理开关。
     // 主题里若只判 `selected`，这一颗会拿到 accent 色 —— 一颗看着完全能拨
     // 的滑块。这一条锁的是「封住的开关不许用可用的那套颜色」。
     SharedPreferences.setMockInitialValues(<String, Object>{});
-    final settings = await SettingsStore.load();
-    settings.vpnEnabled = true;
+    final settings = await StubSettingsStore.load();
+    settings.socksProxyEnabled = true;
     await _pumpSettingsSubPage(
       tester,
       page: const ShuConnectionSettingsPage(),
@@ -1055,11 +1099,11 @@ void main() {
     expect(track, colors.textMuted, reason: '封住但开着，要能与封住且关着区分');
 
     // 顺带把「它确实是开着的」也钉住：否则这一条可能只是碰上了出厂关闭。
-    final vpnSwitch = tester
-        .widgetList<SwitchListTile>(find.byType(SwitchListTile))
-        .last;
-    expect(vpnSwitch.value, isTrue);
-    expect(vpnSwitch.onChanged, isNull);
+    final socksSwitch = tester.widget<SwitchListTile>(
+      find.widgetWithText(SwitchListTile, '启用 SOCKS5 代理'),
+    );
+    expect(socksSwitch.value, isTrue);
+    expect(socksSwitch.onChanged, isNull);
   });
 
   testWidgets('the experimental page holds the TCP window switch', (
@@ -1141,27 +1185,6 @@ void main() {
     expect(find.text('欢迎使用 ShuVPN'), findsOneWidget);
     // 引导页盖住了 dock —— 门是关着的。
     expect(find.byType(FloatingDock), findsNothing);
-  });
-
-  testWidgets('the defaults live in the settings store, not in the widgets', (
-    tester,
-  ) async {
-    SharedPreferences.setMockInitialValues(<String, Object>{});
-    final settings = await SettingsStore.load();
-
-    expect(settings.socksPort, 2233);
-    expect(settings.httpPort, 3322);
-    expect(settings.socksProxyEnabled, isFalse);
-    expect(settings.httpProxyEnabled, isFalse);
-    expect(settings.vpnEnabled, isTrue);
-    expect(settings.vpnMtu, 1400);
-    expect(settings.vpnDns, isEmpty);
-    // 接收窗口缩放出厂开着：对端不带那个选项时它自己退回 64 KB，
-    // 所以开着没有代价，而关掉才是「回到旧行为」。
-    expect(settings.vpnTcpWindowScaling, isTrue);
-    // 监听范围是一条安全边界，出厂值只能是本机。
-    expect(settings.socksListen.address, '127.0.0.1');
-    expect(settings.httpListen.address, '127.0.0.1');
   });
 
   testWidgets('the settings sub-pages drop the card wrapper too', (

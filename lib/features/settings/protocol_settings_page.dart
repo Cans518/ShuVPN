@@ -1,12 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
-import '../../core/auth/atrust_device_id.dart';
+import '../../core/account/account_center.dart';
 import '../../core/connection/connection_controller.dart';
 import '../../core/connection/protocol.dart';
 import '../../core/settings/settings_store.dart';
 import '../../widgets/settings_rows.dart';
 import '../../widgets/settings_scaffold.dart';
+import '../../widgets/settings_save.dart';
 import '../../widgets/shu_surfaces.dart';
 
 /// 「aTrust 协议」。
@@ -23,11 +24,7 @@ import '../../widgets/shu_surfaces.dart';
 ///
 /// ## 配置项是怎么挑出来的
 ///
-/// 它们**一一对应到 SDK 真的收下的那几个参数**，而不是照着别的客户端抄一份
-/// 表单出来。协议核心收的是一个 `SangforConnectOptions`，里面可配的只有
-/// 服务器、`loginDomain`、`deviceId`、`timeout`（用户名密码在 OAuth2 链路上
-/// 根本不发，`authType` 只有密码一种被实现）。所以这一页就是这几项，
-/// 每项都能直接用 —— 不改也能连上，想改的地方都摆在这里。
+/// 设置通过 RustSettingsStore 提交，账户与设备标识由原生账户所有者提供。
 ///
 /// 服务器地址与登录域不是「空着待填」的：它们出厂就有值（[SettingsStore]
 /// 的默认就是上大那台网关），点进去是**改**而不是**填**。
@@ -37,7 +34,8 @@ class ShuATrustSettingsPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final settings = context.watch<SettingsStore>();
-    final deviceId = ShuATrustDeviceId(settings.preferences);
+    final account = context.watch<AccountCenter?>();
+    final deviceId = account?.maskedDeviceId ?? '—';
     // 隧道在跑时这一页的每一项都改不动。判据是 `tunnelUp` 而不是 `busy`：
     // 这些值全是下一次握手才会被读的参数，正握手中改一下同样只会得到
     // 「界面上写着新值、实际还是旧值」。
@@ -52,8 +50,12 @@ class ShuATrustSettingsPage extends StatelessWidget {
           title: '启用 aTrust',
           value: settings.isProtocolEnabled(ShuProtocol.atrust),
           enabled: !locked,
-          onChanged: (value) =>
-              settings.setProtocolEnabled(ShuProtocol.atrust, value),
+          onChanged: (value) => saveShuSetting(
+            context,
+            settings,
+            SettingKey.atrustEnabled,
+            value,
+          ),
         ),
 
         const SectionHeader(title: '基础配置'),
@@ -83,11 +85,7 @@ class ShuATrustSettingsPage extends StatelessWidget {
         // 设备标识是**只读**的：它由应用生成并持久化，网关用它把会话绑在机器上 ——
         // 这里既不该让用户编一个，也不该让用户把它清掉（清了等于换了台手机）。
         // 之所以还是摆出来：排障时「这台机器在网关眼里是谁」是第一个要看的东西。
-        SettingsRow(
-          icon: Icons.fingerprint,
-          title: '设备标识',
-          value: deviceId.masked,
-        ),
+        SettingsRow(icon: Icons.fingerprint, title: '设备标识', value: deviceId),
         // 协议栈同理：没有第二个选项的选择不叫选择。写在这里是为了让人知道
         // 走的是 OAuth2 而不是网关的本地密码分支。
         SettingsRow(
@@ -114,14 +112,10 @@ class ShuATrustSettingsPage extends StatelessWidget {
       title: '服务器地址',
       label: '域名或 IP',
       initial: settings.server,
-      validate: (value) {
-        if (value.isEmpty) return '不能为空';
-        if (value.contains(' ')) return '不能包含空格';
-        return null;
-      },
+      validate: (value) => settings.validationMessage(SettingKey.server, value),
     );
-    if (value == null) return;
-    settings.server = value;
+    if (value == null || !context.mounted) return;
+    await saveShuSetting(context, settings, SettingKey.server, value);
   }
 
   Future<void> _editLoginDomain(
@@ -133,10 +127,11 @@ class ShuATrustSettingsPage extends StatelessWidget {
       title: '登录域',
       label: 'sfDomain',
       initial: settings.loginDomain,
-      validate: (value) => value.isEmpty ? '不能为空' : null,
+      validate: (value) =>
+          settings.validationMessage(SettingKey.loginDomain, value),
     );
-    if (value == null) return;
-    settings.loginDomain = value;
+    if (value == null || !context.mounted) return;
+    await saveShuSetting(context, settings, SettingKey.loginDomain, value);
   }
 
   Future<void> _pickTimeout(
@@ -154,7 +149,9 @@ class ShuATrustSettingsPage extends StatelessWidget {
         ShuChoice(180, '180 秒'),
       ],
     );
-    if (next != null) settings.timeout = Duration(seconds: next);
+    if (next != null && context.mounted) {
+      await saveShuSetting(context, settings, SettingKey.timeoutSeconds, next);
+    }
   }
 
   /// 恢复出厂值。它**删掉**协议相关的设置键，而不是写一份常量进去 ——
@@ -186,8 +183,13 @@ class ShuATrustSettingsPage extends StatelessWidget {
         ],
       ),
     );
-    if (confirmed != true) return;
-    await settings.restoreConnectionDefaults();
+    if (confirmed != true || !context.mounted) return;
+    if (!await runShuSettingsCommand(
+      context,
+      settings.restoreConnectionDefaults,
+    )) {
+      return;
+    }
     if (!context.mounted) return;
     showShuSnack(context, '已恢复默认值');
   }
@@ -202,10 +204,7 @@ class ShuATrustSettingsPage extends StatelessWidget {
 /// 等于把同一份数据在两个地方各说一次。**未接入的协议没有任何参数**，
 /// 摆空的分组标题反而让人以为下面漏了内容。
 ///
-/// 为什么封住而不是把这一页删掉：协议核心就在包里
-/// （`flutter_sangfor_easy_connect`），把它接上就是把这一行的 `enabled`
-/// 换掉，不是从零开始。把入口留着，用户能看见「这个位置有东西」（它是一个
-/// 真的入口，目录页也有它一行），只是现在还不提供服务。
+/// 保留预留入口并明确标为不可用；当前原生核心只提供 aTrust。
 class ShuEasyConnectSettingsPage extends StatelessWidget {
   const ShuEasyConnectSettingsPage({super.key});
 

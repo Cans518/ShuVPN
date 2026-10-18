@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_sangfor/flutter_sangfor.dart';
+
+import '../core/connection/connection_status.dart';
 
 import 'page_transitions.dart';
 import 'shuyo_text_styles.dart';
@@ -26,9 +27,8 @@ abstract final class ShuSpacing {
 
   static const double dockGap = 12;
 
-  /// Bottom padding every scrolling page must reserve, otherwise the last list
-  /// item ends up underneath the floating dock.
-  static const double dockInset = dockHeight + dockGap + page;
+  /// Space after the final list item; the shell reserves the dock's height.
+  static const double dockInset = dockGap + page;
 }
 
 abstract final class ShuMotion {
@@ -82,6 +82,7 @@ class ShuYoThemeSpec {
 
     return ThemeData(
       useMaterial3: true,
+      fontFamily: ShuYoTextStyles.fontFamily,
       brightness: colors.brightness,
       colorScheme: scheme,
       scaffoldBackgroundColor: colors.background,
@@ -94,6 +95,7 @@ class ShuYoThemeSpec {
         builders: shuPageTransitionsBuilders(),
       ),
       textTheme: ShuYoTextStyles.theme.apply(
+        fontFamily: ShuYoTextStyles.fontFamily,
         bodyColor: colors.textPrimary,
         displayColor: colors.textPrimary,
       ),
@@ -895,11 +897,11 @@ class ConnectionStateStyle {
 ConnectionStateStyle connectionStateStyle(
   ShuYoColors colors,
   ColorScheme scheme,
-  SangforConnectionState state, {
+  ConnectionStatus state, {
   String? detail,
 }) {
   return switch (state) {
-    SangforConnectionState.disconnected => ConnectionStateStyle(
+    ConnectionStatus.disconnected => ConnectionStateStyle(
       color: colors.textMuted,
       // 未连接不是一个「错误」也不是一个「成就」，所以它取的是最中性的一对：
       // 表面色 + 次级前景。它在页面上不抢眼，这正是它该有的分量。
@@ -909,7 +911,7 @@ ConnectionStateStyle connectionStateStyle(
       label: '未连接',
       detail: detail ?? '点击连接',
     ),
-    SangforConnectionState.connecting => ConnectionStateStyle(
+    ConnectionStatus.connecting => ConnectionStateStyle(
       color: colors.accent,
       container: scheme.primaryContainer,
       onContainer: scheme.onPrimaryContainer,
@@ -918,10 +920,8 @@ ConnectionStateStyle connectionStateStyle(
       detail: detail ?? '正在登录',
       indeterminate: true,
     ),
-    // The SDK reports a real intermediate state between "credentials accepted"
-    // and "tunnel up"; showing it separately is what makes a stuck login
-    // diagnosable instead of just "connecting forever".
-    SangforConnectionState.authenticated => ConnectionStateStyle(
+    // Presentation style reserved for the authenticated transition.
+    ConnectionStatus.authenticated => ConnectionStateStyle(
       color: colors.accentAlt,
       container: scheme.secondaryContainer,
       onContainer: scheme.onSecondaryContainer,
@@ -933,7 +933,7 @@ ConnectionStateStyle connectionStateStyle(
     ),
     // 已连接用**最重**的一对：primary / onPrimary 是整套方案里最"实"的颜色。
     // 页面在连通的那一刻应当明显变一下，那是这个应用最重要的一秒。
-    SangforConnectionState.connected => ConnectionStateStyle(
+    ConnectionStatus.connected => ConnectionStateStyle(
       color: colors.success,
       container: scheme.primary,
       onContainer: scheme.onPrimary,
@@ -942,7 +942,7 @@ ConnectionStateStyle connectionStateStyle(
       detail: detail ?? '',
       progress: 1,
     ),
-    SangforConnectionState.disconnecting => ConnectionStateStyle(
+    ConnectionStatus.disconnecting => ConnectionStateStyle(
       color: colors.warning,
       container: scheme.tertiaryContainer,
       onContainer: scheme.onTertiaryContainer,
@@ -951,7 +951,7 @@ ConnectionStateStyle connectionStateStyle(
       detail: detail ?? '',
       indeterminate: true,
     ),
-    SangforConnectionState.error => ConnectionStateStyle(
+    ConnectionStatus.error => ConnectionStateStyle(
       color: colors.danger,
       container: scheme.errorContainer,
       onContainer: scheme.onErrorContainer,

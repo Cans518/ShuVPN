@@ -72,6 +72,10 @@ class StubShuAnnouncementClient implements ShuAnnouncementClient {
 
   /// 同上，正文那一条路。
   Object? detailError;
+  Future<ShuAnnouncementPrefetch> Function(List<ShuAnnouncementListItem>)?
+  onPrefetch;
+  Future<ShuAnnouncementPage> Function(Uri?)? onList;
+  final prefetchRequests = <List<ShuAnnouncementListItem>>[];
 
   /// 收到过的列表地址，null 表示「第一页」。
   final List<Uri?> requestedPages = <Uri?>[];
@@ -87,6 +91,7 @@ class StubShuAnnouncementClient implements ShuAnnouncementClient {
   @override
   Future<ShuAnnouncementPage> fetchList({Uri? page}) async {
     requestedPages.add(page);
+    if (onList case final callback?) return callback(page);
     final failure = listError;
     if (failure != null) throw failure;
     if (page == null) return firstPage;
@@ -109,5 +114,41 @@ class StubShuAnnouncementClient implements ShuAnnouncementClient {
   ShuAnnouncementDetail? cachedDetail(Uri url) => _cache[url.toString()];
 
   @override
+  Future<ShuAnnouncementPrefetch> prefetch(
+    List<ShuAnnouncementListItem> items,
+  ) async {
+    prefetchRequests.add(List.of(items));
+    if (onPrefetch case final callback?) return callback(items);
+    return _StubPrefetch(this, items);
+  }
+
+  @override
   void close() {}
+}
+
+/// Simulated native preview responses, not an implementation of HTTP scheduling.
+class _StubPrefetch implements ShuAnnouncementPrefetch {
+  _StubPrefetch(this.client, this.items);
+  final StubShuAnnouncementClient client;
+  final List<ShuAnnouncementListItem> items;
+  bool cancelled = false;
+  @override
+  Stream<ShuAnnouncementPreview> get previews async* {
+    for (final item in items) {
+      if (cancelled) return;
+      if (!isShuAnnouncementUrl(item.url)) continue;
+      try {
+        final detail =
+            client.cachedDetail(item.url) ?? await client.fetchDetail(item);
+        if (cancelled) return;
+        yield ShuAnnouncementPreview(url: item.url, text: detail.preview);
+      } on Object catch (error) {
+        if (cancelled) return;
+        yield ShuAnnouncementPreview(url: item.url, error: '$error');
+      }
+    }
+  }
+
+  @override
+  void cancel() => cancelled = true;
 }

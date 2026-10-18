@@ -4,9 +4,9 @@ import 'package:provider/provider.dart';
 
 import '../../app/shuyo_text_styles.dart';
 import '../../app/theme.dart';
-import '../../core/connection/vpn_packet_log.dart';
 import '../../core/logging/shu_log.dart';
 import '../../core/settings/settings_store.dart';
+import '../../widgets/settings_save.dart';
 import '../../widgets/settings_rows.dart';
 import '../../widgets/settings_scaffold.dart';
 import '../../widgets/shu_app_bar.dart';
@@ -103,7 +103,14 @@ class _ShuLogPageState extends State<ShuLogPage> {
           ShuChoice<ShuLogLevel>(level, level.label, _levelHint(level)),
       ],
     );
-    if (picked != null) settings.logLevel = picked;
+    if (picked != null && mounted) {
+      await saveShuSetting(
+        context,
+        settings,
+        SettingKey.logLevel,
+        picked.label,
+      );
+    }
   }
 
   @override
@@ -146,7 +153,8 @@ class _ShuLogPageState extends State<ShuLogPage> {
             icon: Icons.receipt_long_outlined,
             title: '启用日志',
             value: settings.logEnabled,
-            onChanged: (value) => settings.logEnabled = value,
+            onChanged: (value) =>
+                saveShuSetting(context, settings, SettingKey.logEnabled, value),
           ),
           SettingsRow(
             icon: Icons.tune,
@@ -239,12 +247,10 @@ class _ShuLogPageState extends State<ShuLogPage> {
       };
 
   static String _levelHint(ShuLogLevel level) => switch (level) {
-    ShuLogLevel.error => '只记失败与异常，含发不出去的包',
-    ShuLogLevel.warn => '错误，以及被兜住的问题和被丢掉的包',
-    ShuLogLevel.info => '警告，加上每一步流程与每条网络流的一行记录',
-    ShuLogLevel.debug =>
-      '全部细节，含逐个网络包的去向（每秒最多 '
-          '${ShuPacketObserver.debugBudgetPerSecond} 行）',
+    ShuLogLevel.error => '只记失败与异常',
+    ShuLogLevel.warn => '错误与需要留意的问题',
+    ShuLogLevel.info => '警告与连接操作的主要过程',
+    ShuLogLevel.debug => '全部日志，适合排查连接问题',
   };
 }
 
@@ -265,8 +271,7 @@ class _LogLine extends StatelessWidget {
       padding: const EdgeInsets.only(bottom: 3),
       child: Text(
         record.formatLines().join('\n'),
-        style: ShuYoTextStyles.meta(color: color)
-            .copyWith(fontFamily: 'monospace', height: 1.45),
+        style: ShuYoTextStyles.meta(color: color).copyWith(height: 1.45),
       ),
     );
   }

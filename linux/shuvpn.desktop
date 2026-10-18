@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=ShuVPN
+Comment=Campus VPN and proxy
+Exec=/opt/shuvpn/shuvpn
+Icon=/opt/shuvpn/data/flutter_assets/assets/images/icon_light.png
+Terminal=false
+Categories=Network;
+StartupWMClass=work.shuvpn.app

@@ -1,12 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
-import '../core/account/account_center.dart';
 import '../core/announcements/shu_announcement.dart';
 import '../core/settings/settings_store.dart';
 import '../features/account/account_page.dart';
 import '../features/connect/connect_page.dart';
+import '../features/connect/connection_records_page.dart';
 import '../features/notifications/announcement_detail_page.dart';
 import '../features/notifications/notifications_page.dart';
 import '../features/onboarding/welcome_page.dart';
@@ -19,6 +18,7 @@ import '../features/settings/experimental_settings_page.dart';
 import '../features/settings/log_page.dart';
 import '../features/settings/protocol_settings_page.dart';
 import '../features/settings/settings_page.dart';
+import '../features/settings/routing_settings_page.dart';
 import '../shell/dock_shell.dart';
 
 /// 新用户引导所在的路径。
@@ -169,6 +169,11 @@ GoRouter createShuRouter({required SettingsStore settings}) {
                   ),
                   _subPage(
                     parentNavigatorKey: rootNavigatorKey,
+                    path: 'routing',
+                    builder: (context, state) => const RoutingSettingsPage(),
+                  ),
+                  _subPage(
+                    parentNavigatorKey: rootNavigatorKey,
                     path: 'experimental',
                     builder: (context, state) =>
                         const ShuExperimentalSettingsPage(),
@@ -207,6 +212,11 @@ GoRouter createShuRouter({required SettingsStore settings}) {
       ),
       _subPage(
         parentNavigatorKey: rootNavigatorKey,
+        path: '/connection-records',
+        builder: (context, state) => const ConnectionRecordsPage(),
+      ),
+      _subPage(
+        parentNavigatorKey: rootNavigatorKey,
         path: '/notifications',
         builder: (context, state) => const NotificationsPage(),
         routes: <RouteBase>[
@@ -231,14 +241,3 @@ GoRouter createShuRouter({required SettingsStore settings}) {
     ],
   );
 }
-
-/// The account surface currently in use.
-///
-/// Backed by the real Shanghai University unified-identity flow: one login, then
-/// a credential exchange per registered system (see `lib/core/auth`).
-///
-/// [preferences] is threaded in so the aTrust device id is the same one the
-/// tunnel uses — the gateway binds a session to a device — and so the account
-/// snapshot (last verified identity and system states) survives a restart.
-AccountCenter createAccountCenter({SharedPreferences? preferences}) =>
-    ShuAccountCenter(preferences: preferences);

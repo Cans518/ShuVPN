@@ -2,16 +2,18 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_sangfor/flutter_sangfor.dart';
+
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
 import '../../app/shuyo_text_styles.dart';
 import '../../app/theme.dart';
 import '../../core/connection/connection_controller.dart';
+import '../../core/connection/connection_status.dart';
 import '../../core/connection/protocol.dart';
-import '../../core/connection/vpn_notification.dart';
+import '../../core/connection/connection_telemetry.dart';
 import '../../core/settings/settings_store.dart';
+import '../../widgets/labelled_icon_button.dart';
 import '../../widgets/shu_app_bar.dart';
 import '../../widgets/shu_surfaces.dart';
 import 'connect_button.dart';
@@ -140,10 +142,17 @@ class ConnectPage extends StatelessWidget {
       appBar: ShuAppBar(
         title: '连接',
         onNotifications: () => context.push('/notifications'),
+        actions: controller.desktopProxySettingsVisible
+            ? [
+                LabelledIconButton(
+                  tooltip: '连接记录',
+                  onPressed: () => context.push('/connection-records'),
+                  icon: Icons.history,
+                ),
+              ]
+            : null,
       ),
-      // `DockShell` 开着 `extendBody`，所以底栏是**压在**这一页上面的；
-      // 这一层 `SafeArea` 会替我们把它和手势条的高度留出来
-      // （`Scaffold` 在 `extendBody` 时把底栏高度并进了 body 的 padding）。
+      // DockShell 已为底栏留出布局空间；这里仅避开系统安全区域。
       body: SafeArea(
         child: Stack(
           fit: StackFit.expand,
@@ -571,7 +580,7 @@ class _ConnectionDrawerState extends State<_ConnectionDrawer> {
     final controller = widget.controller;
     // 「成功连上」是「连接方式」出现的**唯一**条件；协议的只读还多一种：
     // 正在连（`busy`）时也不该改 —— 那时已经有一份 `state` 在路上了。
-    final connected = controller.state == SangforConnectionState.connected;
+    final connected = controller.state == ConnectionStatus.connected;
     final locked = controller.busy || connected;
     final selected = controller.draft.protocol;
 
@@ -600,11 +609,15 @@ class _ConnectionDrawerState extends State<_ConnectionDrawer> {
       if (settings.vpnEnabled || controller.vpnRunning)
         _DrawerRow(
           icon: Icons.vpn_lock_outlined,
-          title: 'Android VPN 服务',
+          title: controller.desktopProxySettingsVisible ? '桌面 VPN' : '校园分流',
           trailing: ShuStatusSlot(
             // 这一行说的是**接口建起来没有**，不是「设置里开着没有」——
             // 开着却没起来正是要看的那种状态，用设置值回答等于什么都没说。
-            text: controller.vpnRunning ? '已启用' : '已关闭',
+            text: controller.vpnRunning
+                ? controller.desktopTunStatus.captureMode == CaptureMode.full
+                      ? '完整捕获 · 已启用'
+                      : '校园分流 · 已启用'
+                : '已关闭',
             color: controller.vpnRunning ? colors.accent : colors.textMuted,
           ),
         ),
@@ -1026,14 +1039,14 @@ class _ConnectionStatusRow extends StatelessWidget {
 
   bool get _busy {
     final state = controller.state;
-    return state == SangforConnectionState.connecting ||
-        state == SangforConnectionState.authenticated ||
-        state == SangforConnectionState.disconnecting;
+    return state == ConnectionStatus.connecting ||
+        state == ConnectionStatus.authenticated ||
+        state == ConnectionStatus.disconnecting;
   }
 
-  bool get _connected => controller.state == SangforConnectionState.connected;
+  bool get _connected => controller.state == ConnectionStatus.connected;
 
-  bool get _failed => controller.state == SangforConnectionState.error;
+  bool get _failed => controller.state == ConnectionStatus.error;
 
   @override
   Widget build(BuildContext context) {
@@ -1049,8 +1062,8 @@ class _ConnectionStatusRow extends StatelessWidget {
     // 已连接时只剩地址本身，不再冠一个 `IP ` —— 这一行没有第二个可能是
     // 地址的东西（副标题是上下行与时延），前缀只是一对多余的字符。
     final title = switch (controller.state) {
-      SangforConnectionState.connected => controller.virtualAddress ?? '分配中',
-      SangforConnectionState.error =>
+      ConnectionStatus.connected => controller.virtualAddress ?? '分配中',
+      ConnectionStatus.error =>
         controller.errorMessage ?? controller.errorCode?.name ?? '连接失败',
       _ when !usable => '无可用协议',
       _ => protocol.label,
@@ -1058,12 +1071,12 @@ class _ConnectionStatusRow extends StatelessWidget {
     // 副标题：这一行是**补充**。已连接时那串读数与系统通知的正文同一个
     // 函数（`formatConnectionTelemetry`）—— 通知栏与这张抽屉会同时被看到。
     final subtitle = switch (controller.state) {
-      SangforConnectionState.connected => formatConnectionTelemetry(
+      ConnectionStatus.connected => formatConnectionTelemetry(
         upBytesPerSecond: controller.uploadBytesPerSecond,
         downBytesPerSecond: controller.downloadBytesPerSecond,
         latencyMs: controller.latencyMs,
       ),
-      SangforConnectionState.error =>
+      ConnectionStatus.error =>
         '${protocol.label} · ${controller.draft.server}',
       _ when !usable => '去设置里启用一个协议',
       _ => controller.draft.server,
@@ -1082,8 +1095,8 @@ class _ConnectionStatusRow extends StatelessWidget {
     // 左圆：字形永远是协议自己的，失败才换成警示。已连接只换颜色 ——
     // 一排图标里唯一能认出「走的哪条路」的就是它，不该被换掉。
     final (leadingIcon, leadingColor) = switch (controller.state) {
-      SangforConnectionState.error => (Icons.error_outline, colors.danger),
-      SangforConnectionState.connected => (protocol.icon, colors.success),
+      ConnectionStatus.error => (Icons.error_outline, colors.danger),
+      ConnectionStatus.connected => (protocol.icon, colors.success),
       _ when !usable => (Icons.block, colors.warning),
       _ => (protocol.icon, colors.accent),
     };

@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 
 import '../../core/settings/settings_store.dart';
 import '../../widgets/settings_scaffold.dart';
+import '../../widgets/settings_save.dart';
 
 /// 「外观」。
 ///
@@ -27,7 +28,12 @@ class ShuAppearanceSettingsPage extends StatelessWidget {
             value: mode,
             current: settings.themeMode,
             label: _label(mode),
-            onSelected: (value) => settings.themeMode = value,
+            onSelected: (value) => saveShuSetting(
+              context,
+              settings,
+              SettingKey.themeMode,
+              value.name,
+            ),
           ),
       ],
     );

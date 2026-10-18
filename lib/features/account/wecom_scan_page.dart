@@ -8,17 +8,12 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../app/shuyo_text_styles.dart';
 import '../../app/theme.dart';
 import '../../core/account/account_center.dart';
-import '../../core/auth/native_auth_service.dart';
-import '../../core/auth/wecom_auth_service.dart';
+import '../../core/account/qr_account.dart';
+import '../../core/auth/auth_exception.dart';
 
 /// 企业微信扫码登录等待页。
 ///
-/// 结构照搬 ShuYo 的 `WeComScanPage`：展示二维码，支持点击拉起企业微信
-/// 确认页；后台长轮询等待扫码，成功后把会话交回 [AccountCenter]。
-///
-/// 与 ShuYo 的差别只有一处：ShuYo 把换来的 Cookie 交给登录页自己消费，
-/// 这里直接交给账户中心 —— 后面向三个系统换取授权码要用同一个
-/// `SHU_OAUTH2` 会话。
+/// 展示原生登录操作的二维码、扫码状态与凭据获取进度。
 class WeComScanPage extends StatefulWidget {
   const WeComScanPage({super.key});
 
@@ -27,89 +22,76 @@ class WeComScanPage extends StatefulWidget {
 }
 
 class _WeComScanPageState extends State<WeComScanPage> {
-  final _service = ShuWeComAuthService();
+  QrAccount? _native;
+  QrLoginImage? _nativeImage;
 
-  ShuWeComQrSession? _session;
-  ShuWeComScanStatus _status = ShuWeComScanStatus.waiting;
+  QrLoginStatus _status = QrLoginStatus.waiting;
   bool _busy = true;
   bool _launchingLink = false;
-  bool _cancelled = false;
+  bool _credentials = false;
+  bool _running = false;
   String? _error;
 
   @override
   void initState() {
     super.initState();
+    final account = context.read<AccountCenter>();
+    if (account is QrAccount) {
+      _native = account as QrAccount;
+    }
     unawaited(_start());
   }
 
   @override
   void dispose() {
-    // 页面被销毁时取消后台长轮询，避免在后台继续发起网络请求。
-    _cancelled = true;
-    _service.dispose();
+    // 已完成页面的退场不能取消随后开始的新操作。
+    if (_running) _native?.cancelQr();
     super.dispose();
   }
 
   Future<void> _start() async {
     try {
-      final session = await _service.startQrSession();
-      if (!mounted) return;
-      setState(() {
-        _session = session;
-        _busy = false;
-      });
-      unawaited(_waitForScan(session.key));
-    } on Object catch (error) {
-      if (!mounted) return;
-      setState(() {
-        _busy = false;
-        _error = error is ShuAuthException ? error.message : '无法连接企业微信服务，请稍后再试';
-      });
-    }
-  }
-
-  /// 后台长轮询，状态变化时刷新界面，成功后换取目标业务系统回调地址。
-  Future<void> _waitForScan(String key) async {
-    final result = await _service.waitForScan(
-      key,
-      isCancelled: () => _cancelled,
-      onStatusChanged: (status) {
-        if (mounted && status != _status) {
-          setState(() => _status = status);
-        }
-      },
-    );
-    if (!mounted) return;
-    if (!result.isSuccess) {
-      setState(() => _error = '二维码已过期或已取消，请重新尝试');
-      return;
-    }
-    try {
-      final session = await _service.redeem(
-        result.authCode!,
-        ShuWeComAuthService.weComRedeemState,
-      );
-      if (!mounted) return;
-      setState(() => _status = ShuWeComScanStatus.succeeded);
-      _busy = true;
-      // 扫码换到的只是 SSO 会话；三个业务系统还要一个一个去换。
-      final account = context.read<AccountCenter>();
-      final adopted = await account.adoptWeComSession(
-        cookies: session.sessionCookies,
-        username: '',
-      );
-      if (!mounted) return;
-      if (!adopted) {
+      final native = _native;
+      if (native == null) {
         setState(() {
           _busy = false;
-          _error = account.errorMessage ?? '企业微信登录失败';
+          _error = '当前账户未提供原生扫码登录，请重新启动完整应用';
         });
         return;
       }
-      // 只做到这一步：扫码换到的是 SSO 会话，凭据交换交给调用方（登录表单）
-      // 统一做。这里再跑一遍会变成两次完整的交换。
+      _running = true;
+      final completed = await native.signInQr(
+        onUpdate: (update) {
+          if (!mounted) return;
+          setState(() {
+            if (update.image != null) _nativeImage = update.image;
+            _busy = update.phase != QrLoginPhase.waiting;
+            _credentials = update.phase == QrLoginPhase.credentials;
+            if (_credentials) _nativeImage = null;
+          });
+        },
+        onStatus: (status) {
+          if (!mounted) return;
+          setState(
+            () => _status = status == QrLoginStatus.succeeded
+                ? QrLoginStatus.confirmedPending
+                : status,
+          );
+        },
+      );
+      _running = false;
+      if (!mounted) return;
+      if (!completed) {
+        setState(() {
+          _busy = false;
+          _error = context.read<AccountCenter>().errorMessage ?? '凭据交换失败，请重新登录';
+        });
+        return;
+      }
+      setState(() => _status = QrLoginStatus.succeeded);
       Navigator.of(context).pop(true);
     } on Object catch (error) {
+      _running = false;
       if (!mounted) return;
       setState(() {
         _busy = false;
@@ -120,16 +102,17 @@ class _WeComScanPageState extends State<WeComScanPage> {
 
   /// 调用系统打开 wxwork:// scheme（或复制链接）。
   Future<void> _openWeCom() async {
-    final session = _session;
-    if (session == null || _launchingLink) return;
+    final scheme = _nativeImage?.schemeUrl;
+    final confirm = _nativeImage?.confirmUrl;
+    if (scheme == null || confirm == null || _launchingLink) return;
     setState(() => _launchingLink = true);
     try {
       final ok = await launchUrl(
-        Uri.parse(session.wxWorkSchemeUrl),
+        Uri.parse(scheme),
         mode: LaunchMode.externalApplication,
       );
       if (!ok) {
-        await Clipboard.setData(ClipboardData(text: session.confirmUrl));
+        await Clipboard.setData(ClipboardData(text: confirm));
         if (mounted) {
           ScaffoldMessenger.of(
             context,
@@ -149,6 +132,7 @@ class _WeComScanPageState extends State<WeComScanPage> {
   @override
   Widget build(BuildContext context) {
     final colors = context.shuyoColors;
+    final progress = context.watch<AccountCenter>().progressLabel;
     return Scaffold(
       backgroundColor: colors.background,
       appBar: AppBar(
@@ -167,12 +151,14 @@ class _WeComScanPageState extends State<WeComScanPage> {
             children: [
               const SizedBox(height: 24),
               Text(
-                '使用企业微信扫一扫',
+                _credentials ? '正在完成登录' : '使用企业微信扫一扫',
                 style: ShuYoTextStyles.title(color: colors.textPrimary),
               ),
               const SizedBox(height: 12),
               Text(
-                '打开手机企业微信，点击右上角扫码，或点击下方按钮直接唤起企业微信。',
+                _credentials
+                    ? (progress ?? '正在获取凭据')
+                    : '打开手机企业微信，点击右上角扫码，或点击下方按钮直接唤起企业微信。',
                 textAlign: TextAlign.center,
                 style: ShuYoTextStyles.body(color: colors.textSecondary),
               ),
@@ -182,7 +168,7 @@ class _WeComScanPageState extends State<WeComScanPage> {
                   dimension: 220,
                   child: Center(child: CircularProgressIndicator()),
                 )
-              else if (_session != null)
+              else if (_nativeImage != null)
                 ClipRRect(
                   borderRadius: BorderRadius.circular(ShuRadii.tile),
                   child: Container(
@@ -190,8 +176,8 @@ class _WeComScanPageState extends State<WeComScanPage> {
                     height: 220,
                     color: Colors.white,
                     padding: const EdgeInsets.all(8),
-                    child: Image.network(
-                      _session!.qrImageUrl,
+                    child: Image.memory(
+                      _nativeImage!.bytes,
                       fit: BoxFit.contain,
                       errorBuilder: (context, error, stackTrace) =>
                           const Center(
@@ -207,17 +193,23 @@ class _WeComScanPageState extends State<WeComScanPage> {
                   textAlign: TextAlign.center,
                   style: ShuYoTextStyles.body(color: colors.danger),
                 )
-              else
+              else if (!_credentials)
                 _statusWidget(colors),
               const SizedBox(height: 16),
               OutlinedButton.icon(
-                onPressed: _launchingLink ? null : _openWeCom,
+                onPressed:
+                    _launchingLink ||
+                        _busy ||
+                        _error != null ||
+                        _nativeImage == null
+                    ? null
+                    : _openWeCom,
                 icon: const Icon(Icons.open_in_new),
                 label: const Text('打开企业微信登录'),
               ),
               const SizedBox(height: 8),
               Text(
-                '扫码确认后请返回本应用',
+                _credentials ? '请稍候' : '扫码确认后请返回本应用',
                 style: ShuYoTextStyles.meta(color: colors.textTertiary),
               ),
             ],
@@ -229,10 +221,10 @@ class _WeComScanPageState extends State<WeComScanPage> {
 
   Widget _statusWidget(ShuYoColors colors) {
     final (text, icon) = switch (_status) {
-      ShuWeComScanStatus.waiting => ('等待扫码…', Icons.schedule),
-      ShuWeComScanStatus.confirmedPending => ('已扫码，请在手机企业微信确认', Icons.android),
-      ShuWeComScanStatus.succeeded => ('登录成功', Icons.check_circle),
-      ShuWeComScanStatus.expired => ('二维码已过期', Icons.error_outline),
+      QrLoginStatus.waiting => ('等待扫码…', Icons.schedule),
+      QrLoginStatus.confirmedPending => ('已扫码，请在手机企业微信确认', Icons.smartphone),
+      QrLoginStatus.succeeded => ('登录成功', Icons.check_circle),
+      QrLoginStatus.expired => ('二维码已过期', Icons.error_outline),
     };
     return Row(
       mainAxisAlignment: MainAxisAlignment.center,

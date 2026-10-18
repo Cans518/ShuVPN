@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../app/shuyo_text_styles.dart';
 import '../app/theme.dart';
+import 'labelled_icon_button.dart';
 
 /// 全应用共用的顶栏。
 ///
@@ -96,15 +97,15 @@ class ShuAppBar extends StatelessWidget implements PreferredSizeWidget {
           SizedBox(
             width: _leadingWidth,
             child: switch ((onBack, onNotifications)) {
-              (final VoidCallback back, _) => IconButton(
-                tooltip: backTooltip,
+              (final VoidCallback back, _) => LabelledIconButton(
+                tooltip: backTooltip ?? '返回',
                 onPressed: backEnabled ? back : null,
-                icon: const Icon(Icons.arrow_back),
+                icon: Icons.arrow_back,
               ),
-              (null, final VoidCallback notify) => IconButton(
+              (null, final VoidCallback notify) => LabelledIconButton(
                 tooltip: '通知',
                 onPressed: notify,
-                icon: const Icon(Icons.notifications_none),
+                icon: Icons.notifications_none,
               ),
               _ => null,
             },

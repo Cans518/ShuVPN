@@ -4,6 +4,8 @@
 // 行为**（点进去是什么、滑到底会不会续、失败能不能重试），解析与取数是另外
 // 两个文件的事（`announcement_parse_test.dart`）。
 
+import 'dart:async';
+
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -11,7 +13,10 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:shuvpn/app/app.dart';
 import 'package:shuvpn/core/announcements/shu_announcement.dart';
-import 'package:shuvpn/core/settings/settings_store.dart';
+import 'package:shuvpn/core/announcements/shu_announcement_client.dart';
+
+import 'settings_stub.dart';
+
 import 'package:shuvpn/features/notifications/announcement_detail_page.dart';
 import 'package:shuvpn/features/notifications/notifications_page.dart';
 import 'package:shuvpn/features/services/coming_soon_page.dart';
@@ -19,6 +24,7 @@ import 'package:shuvpn/shell/floating_dock.dart';
 import 'package:shuvpn/widgets/shu_surfaces.dart';
 
 import 'announcement_stub.dart';
+import 'account_stub.dart';
 import 'shu_update_stub.dart';
 
 /// 一台高瘦手机（逻辑 360×1800）：下面的用例多半在断言「列表里有什么」，
@@ -28,6 +34,20 @@ const Size _tallPhone = Size(720, 3600);
 /// 一台矮手机（逻辑 360×360）。**续页的用例必须用它**：列表短于视口时根本
 /// 滚不动，也就不会有滚动通知，预取那条路一次都跑不到。
 const Size _shortPhone = Size(720, 720);
+
+class _ControlledPreviews implements ShuAnnouncementPrefetch {
+  final events = StreamController<ShuAnnouncementPreview>.broadcast(sync: true);
+  bool cancelled = false;
+  bool listened = false;
+  @override
+  Stream<ShuAnnouncementPreview> get previews {
+    listened = true;
+    return events.stream;
+  }
+
+  @override
+  void cancel() => cancelled = true;
+}
 
 Future<void> _pumpApp(
   WidgetTester tester, {
@@ -39,11 +59,12 @@ Future<void> _pumpApp(
   addTearDown(tester.view.reset);
 
   SharedPreferences.setMockInitialValues(<String, Object>{});
-  final settings = await SettingsStore.load();
+  final settings = await StubSettingsStore.load();
   settings.welcomeCompleted = true;
   await tester.pumpWidget(
     ShuVpnApp(
       settings: settings,
+      accountCenter: StubAccountCenter(),
       updateClient: StubShuUpdateClient(),
       announcementClient: announcements,
     ),
@@ -119,6 +140,136 @@ StubShuAnnouncementClient _pagedClient({
 }
 
 void main() {
+  testWidgets(
+    'refresh rejects a late old batch while keeping the new batch active',
+    (tester) async {
+      final item = stubAnnouncement('epoch');
+      final gate = Completer<ShuAnnouncementPrefetch>();
+      final late = _ControlledPreviews();
+      final current = _ControlledPreviews();
+      addTearDown(late.events.close);
+      addTearDown(current.events.close);
+      var calls = 0;
+      final client = StubShuAnnouncementClient(
+        firstPage: ShuAnnouncementPage(items: [item]),
+      )..onPrefetch = (_) => calls++ == 0 ? gate.future : Future.value(current);
+      await _pumpApp(tester, announcements: client);
+      await _openNotificationsRow(tester);
+      await tester
+          .widget<RefreshIndicator>(find.byType(RefreshIndicator))
+          .onRefresh();
+      await tester.pumpAndSettle();
+      gate.complete(late);
+      await tester.pump();
+      expect(late.cancelled, isTrue);
+      expect(late.listened, isFalse);
+      expect(current.cancelled, isFalse);
+      current.events.add(
+        ShuAnnouncementPreview(url: item.url, text: 'current epoch preview'),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('current epoch preview'), findsOneWidget);
+      await tester.tap(find.byTooltip('返回'));
+      await tester.pumpAndSettle();
+    },
+  );
+
+  testWidgets(
+    'a pagination reply from before refresh cannot append to the new list',
+    (tester) async {
+      final next = Uri.parse('https://newits.shu.edu.cn/index/tzgg/31.htm');
+      final pending = Completer<ShuAnnouncementPage>();
+      var first = ShuAnnouncementPage(
+        items: [for (var i = 0; i < 8; i++) stubAnnouncement('old-$i')],
+        nextPage: next,
+      );
+      final client = StubShuAnnouncementClient()
+        ..onList = (page) =>
+            page == null ? Future.value(first) : pending.future;
+      await _pumpApp(tester, announcements: client, physical: _shortPhone);
+      await _openNotificationsRow(tester);
+      await tester.drag(find.byType(Scrollable).first, const Offset(0, -4000));
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(client.requestedPages, [null, next]);
+      first = ShuAnnouncementPage(
+        items: [stubAnnouncement('new', title: 'fresh list item')],
+      );
+      await tester
+          .widget<RefreshIndicator>(find.byType(RefreshIndicator))
+          .onRefresh();
+      await tester.pumpAndSettle();
+      pending.complete(
+        ShuAnnouncementPage(
+          items: [stubAnnouncement('stale', title: 'stale next item')],
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('fresh list item'), findsOneWidget);
+      expect(find.text('stale next item'), findsNothing);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets('page disposal cancels a preview handle that arrives late', (
+    tester,
+  ) async {
+    final gate = Completer<ShuAnnouncementPrefetch>();
+    final item = stubAnnouncement('late');
+    final client = StubShuAnnouncementClient(
+      firstPage: ShuAnnouncementPage(items: [item]),
+    )..onPrefetch = (_) => gate.future;
+    await _pumpApp(tester, announcements: client);
+    await _openNotificationsRow(tester);
+    await tester.tap(find.byTooltip('返回'));
+    await tester.pumpAndSettle();
+    final batch = _ControlledPreviews();
+    addTearDown(batch.events.close);
+    gate.complete(batch);
+    await tester.pump();
+    expect(batch.cancelled, isTrue);
+    expect(batch.listened, isFalse);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('refresh cancels old preview streams and ignores late results', (
+    tester,
+  ) async {
+    final item = stubAnnouncement('refresh');
+    final first = _ControlledPreviews();
+    final second = _ControlledPreviews();
+    addTearDown(first.events.close);
+    addTearDown(second.events.close);
+    var calls = 0;
+    final client = StubShuAnnouncementClient(
+      firstPage: ShuAnnouncementPage(items: [item]),
+    )..onPrefetch = (_) async => calls++ == 0 ? first : second;
+    await _pumpApp(tester, announcements: client);
+    await _openNotificationsRow(tester);
+    first.events.add(
+      ShuAnnouncementPreview(url: item.url, text: 'first native preview'),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('first native preview'), findsOneWidget);
+    await tester
+        .widget<RefreshIndicator>(find.byType(RefreshIndicator))
+        .onRefresh();
+    await tester.pumpAndSettle();
+    expect(first.cancelled, isTrue);
+    second.events.add(
+      ShuAnnouncementPreview(url: item.url, text: 'current native preview'),
+    );
+    first.events.add(
+      ShuAnnouncementPreview(url: item.url, text: 'late old preview'),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('current native preview'), findsOneWidget);
+    expect(find.text('late old preview'), findsNothing);
+    await tester.tap(find.byTooltip('返回'));
+    await tester.pumpAndSettle();
+    expect(second.cancelled, isTrue);
+    expect(tester.takeException(), isNull);
+  });
+
   group('服务页的两个模块', () {
     testWidgets('lists 网络测速 and 图书馆目录', (tester) async {
       await _pumpApp(tester, announcements: StubShuAnnouncementClient());
@@ -357,6 +508,23 @@ void main() {
       await tester.pumpAndSettle();
     });
 
+    testWidgets('notification content respects the system bottom inset', (
+      tester,
+    ) async {
+      tester.view.padding = FakeViewPadding(bottom: 68);
+      tester.view.viewPadding = FakeViewPadding(bottom: 68);
+      final client = StubShuAnnouncementClient(
+        firstPage: ShuAnnouncementPage(items: [stubAnnouncement('inset')]),
+      );
+      await _pumpApp(tester, announcements: client, physical: _shortPhone);
+      await _openNotificationsRow(tester);
+
+      expect(
+        tester.getRect(find.byType(RefreshIndicator)).bottom,
+        closeTo(_shortPhone.height / 2 - 34, 0.01),
+      );
+    });
+
     testWidgets('a short list loads the next page when scrolled to the end', (
       tester,
     ) async {
@@ -382,6 +550,8 @@ void main() {
       expect(find.text('公告 a9'), findsOneWidget);
       // 续页取的是站点自己在分页里给的地址，不是客户端算出来的页码。
       expect(client.requestedPages, <Uri?>[null, Uri.parse(second)]);
+      // 追加内容会增长列表；再次滚到新的末尾，才检查最终页尾。
+      await _scrollToBottom(tester);
       expect(
         find.byKey(NotificationsPage.listEndKey),
         findsOneWidget,

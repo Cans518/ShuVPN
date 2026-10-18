@@ -6,8 +6,8 @@ import 'package:provider/provider.dart';
 import '../../app/shuyo_text_styles.dart';
 import '../../app/theme.dart';
 import '../../core/account/account_center.dart';
-import '../../core/auth/native_auth_service.dart';
-import 'credential_gate_page.dart';
+import '../../core/auth/auth_exception.dart';
+import '../../core/auth/login_challenge.dart';
 import 'wecom_scan_page.dart';
 
 /// 「上大校园账户」登录表单。
@@ -56,9 +56,8 @@ class ShuLoginFormState extends State<ShuLoginForm> {
   ShuVerificationMethod _method = ShuVerificationMethod.wecom;
   Timer? _countdownTimer;
   int _countdown = 0;
-
-  /// 重发冷却，与 ShuYo 的 `VerificationDeliveryService.cooldown` 一致。
-  static const _cooldown = 60;
+  int _generation = 0;
+  AccountCenter? _commandOwner;
 
   /// 当前步骤，宿主据此决定标题栏文案。
   int get step => _step;
@@ -67,6 +66,8 @@ class ShuLoginFormState extends State<ShuLoginForm> {
 
   @override
   void dispose() {
+    _generation++;
+    _cancelCommand();
     _countdownTimer?.cancel();
     _studentId.dispose();
     _password.dispose();
@@ -75,6 +76,27 @@ class ShuLoginFormState extends State<ShuLoginForm> {
   }
 
   AccountCenter get _account => context.read<AccountCenter>();
+
+  bool _current(int generation) => mounted && generation == _generation;
+
+  void _cancelCommand() {
+    final owner = _commandOwner;
+    _commandOwner = null;
+    owner?.cancelPending();
+  }
+
+  Future<T> _command<T>(
+    int generation,
+    Future<T> Function(AccountCenter) send,
+  ) async {
+    final owner = _account;
+    _commandOwner = owner;
+    try {
+      return await send(owner);
+    } finally {
+      if (generation == _generation) _commandOwner = null;
+    }
+  }
 
   // ------------------------------------------------------------- 宿主接口
 
@@ -93,6 +115,8 @@ class ShuLoginFormState extends State<ShuLoginForm> {
 
   /// 离开时清空输入，避免下次进来还留着上一个学号的密码。
   void reset() {
+    _generation++;
+    _cancelCommand();
     _countdownTimer?.cancel();
     _password.clear();
     _code.clear();
@@ -102,6 +126,7 @@ class ShuLoginFormState extends State<ShuLoginForm> {
       _challenge = null;
       _countdown = 0;
       _error = null;
+      _busy = false;
     });
     widget.onChanged();
   }
@@ -110,6 +135,20 @@ class ShuLoginFormState extends State<ShuLoginForm> {
 
   @override
   Widget build(BuildContext context) {
+    final progress = context.watch<AccountCenter>().progressLabel;
+    return Column(
+      children: [
+        if (_busy)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(24, 16, 24, 0),
+            child: Text(progress ?? '正在处理，请稍候', textAlign: TextAlign.center),
+          ),
+        Expanded(child: _form()),
+      ],
+    );
+  }
+
+  Widget _form() {
     return AnimatedSwitcher(
       duration: const Duration(milliseconds: 260),
       child: _step == 0 ? _credentials() : _verification(),
@@ -308,39 +347,43 @@ class ShuLoginFormState extends State<ShuLoginForm> {
 
   Future<void> _submitCredentials() async {
     if (_busy || _credentialsKey.currentState?.validate() != true) return;
+    final generation = ++_generation;
+    final username = _studentId.text.trim();
+    final password = _password.text;
+    _password.clear();
     setState(() {
       _busy = true;
       _error = null;
     });
     widget.onChanged();
     try {
-      final outcome = await _account.signIn(
-        username: _studentId.text.trim(),
-        password: _password.text,
+      final outcome = await _command(
+        generation,
+        (account) => account.signIn(username: username, password: password),
       );
-      _password.clear();
-      if (!mounted) return;
+      if (!_current(generation)) return;
       switch (outcome.status) {
         case ShuSignInStatus.success:
-          // 身份已经成立，但凭据还在路上 —— 交给过渡页去换并展示过程。
-          await _acquireCredentials();
+          widget.onCompleted();
         case ShuSignInStatus.needsVerification:
           final challenge = outcome.challenge;
           if (challenge == null) return;
           setState(() {
             _challenge = challenge;
-            _method = _preferredMethod(challenge.methods.keys);
+            _method = challenge.selectedMethod;
+            _countdown = challenge.resendAfterSeconds;
             _step = 1;
           });
+          _watchChallenge();
         case ShuSignInStatus.failed:
           setState(() => _error = _account.errorMessage ?? '登录失败，请重试');
       }
     } on ShuAuthException catch (error) {
-      if (mounted) setState(() => _error = error.message);
+      if (_current(generation)) setState(() => _error = error.message);
     } on Object {
-      if (mounted) setState(() => _error = '无法连接学校认证服务，请稍后再试');
+      if (_current(generation)) setState(() => _error = '无法连接学校认证服务，请稍后再试');
     } finally {
-      if (mounted) {
+      if (_current(generation)) {
         setState(() => _busy = false);
         widget.onChanged();
       }
@@ -349,6 +392,7 @@ class ShuLoginFormState extends State<ShuLoginForm> {
 
   Future<void> _startWeComLogin() async {
     if (_busy) return;
+    final generation = ++_generation;
     setState(() {
       _busy = true;
       _error = null;
@@ -357,61 +401,38 @@ class ShuLoginFormState extends State<ShuLoginForm> {
     try {
       final completed = await Navigator.of(context)
           .push<bool>(MaterialPageRoute(builder: (_) => const WeComScanPage()));
-      if (completed != true || !mounted) return;
-      // 扫码只拿到 SSO 会话，三个系统还得一个一个去换。
-      await _acquireCredentials();
+      if (completed != true || !_current(generation)) return;
+      widget.onCompleted();
     } finally {
-      if (mounted) {
+      if (_current(generation)) {
         setState(() => _busy = false);
         widget.onChanged();
       }
     }
   }
 
-  /// 身份验证通过之后：压入凭据过渡页，把「正在跟 aTrust / OTP 取凭据」摆出来。
-  ///
-  /// 交换本身很慢（三个系统、每个都要走一遍授权），没有这一页的话，
-  /// 用户看到的就是一个点了没反应的按钮。
-  Future<void> _acquireCredentials() async {
-    final account = _account;
-    final acquired = await Navigator.of(context).push<bool>(
-      MaterialPageRoute(
-        builder: (_) => ShuCredentialGate(
-          title: '上海大学校园账户',
-          acquire: account.completeSignIn,
-        ),
-      ),
-    );
-    if (!mounted) return;
-    if (acquired == true) {
-      widget.onCompleted();
-      return;
-    }
-    setState(() => _error = account.errorMessage ?? '凭据交换失败，请重新登录');
-  }
-
   Future<void> _sendCode() async {
     if (_busy || _countdown > 0) return;
+    final generation = ++_generation;
     setState(() {
       _busy = true;
       _error = null;
     });
     widget.onChanged();
     try {
-      await _account.sendCode(_method);
-      if (!mounted) return;
-      _startCountdown(_cooldown);
+      await _command(generation, (account) => account.sendCode(_method));
+      if (!mounted || generation != _generation) return;
+      _refreshChallenge();
       ScaffoldMessenger.of(context)
         ..hideCurrentSnackBar()
         ..showSnackBar(const SnackBar(content: Text('验证码已发送')));
     } on ShuAuthException catch (error) {
-      if (mounted) setState(() => _error = error.message);
-      // 发不出去通常是短信被限流，换一条路径再试。
-      if (error.code.toLowerCase() == 'senderror') await _selectAlternate();
+      if (_current(generation)) setState(() => _error = error.message);
     } on Object {
-      if (mounted) setState(() => _error = '验证码发送失败，请稍后重试');
+      if (_current(generation)) setState(() => _error = '验证码发送失败，请稍后重试');
     } finally {
-      if (mounted) {
+      if (_current(generation)) {
+        _refreshChallenge();
         setState(() => _busy = false);
         widget.onChanged();
       }
@@ -420,69 +441,73 @@ class ShuLoginFormState extends State<ShuLoginForm> {
 
   Future<void> _verifyCode() async {
     if (_busy || _verificationKey.currentState?.validate() != true) return;
+    final generation = ++_generation;
     setState(() {
       _busy = true;
       _error = null;
     });
     widget.onChanged();
     try {
-      final ok = await _account.submitCode(_method, _code.text.trim());
-      if (!mounted) return;
+      final ok = await _command(
+        generation,
+        (account) => account.submitCode(_method, _code.text.trim()),
+      );
+      if (!_current(generation)) return;
       if (ok) {
+        _countdownTimer?.cancel();
         _code.clear();
-        await _acquireCredentials();
+        widget.onCompleted();
         return;
       }
       setState(() => _error = _account.errorMessage ?? '验证失败，请重试');
     } on ShuAuthException catch (error) {
-      if (mounted) setState(() => _error = error.message);
+      if (_current(generation)) setState(() => _error = error.message);
     } on Object {
-      if (mounted) setState(() => _error = '验证失败，请检查网络后重试');
+      if (_current(generation)) setState(() => _error = '验证失败，请检查网络后重试');
     } finally {
-      if (mounted) {
+      if (_current(generation)) {
+        _refreshChallenge();
         setState(() => _busy = false);
         widget.onChanged();
       }
     }
   }
 
-  /// 优先企业微信：短信有频次限制，企微不会因为限流而失败。
-  ShuVerificationMethod _preferredMethod(
-    Iterable<ShuVerificationMethod> available,
-  ) {
-    final methods = available.toSet();
-    if (methods.isEmpty) return ShuVerificationMethod.wecom;
-    return methods.contains(ShuVerificationMethod.wecom)
-        ? ShuVerificationMethod.wecom
-        : methods.first;
+  void _selectMethod(ShuVerificationMethod method) {
+    if (!mounted) return;
+    try {
+      _account.selectVerificationMethod(method);
+      _refreshChallenge();
+    } on ShuAuthException catch (error) {
+      setState(() => _error = error.message);
+    }
   }
 
-  Future<void> _selectMethod(ShuVerificationMethod method) async {
+  void _watchChallenge() {
     _countdownTimer?.cancel();
-    if (!mounted) return;
-    setState(() {
-      _method = method;
-      _countdown = 0;
+    _countdownTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (!_busy) _refreshChallenge();
     });
   }
 
-  Future<void> _selectAlternate() async {
-    final methods = _challenge?.methods.keys.toSet() ?? const {};
-    if (methods.length < 2) return;
-    final alternate = methods.firstWhere((method) => method != _method);
-    await _selectMethod(alternate);
-  }
-
-  void _startCountdown(int seconds) {
-    _countdownTimer?.cancel();
-    setState(() => _countdown = seconds);
-    _countdownTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
-      if (!mounted || _countdown <= 1) {
-        timer.cancel();
-        if (mounted) setState(() => _countdown = 0);
-        return;
-      }
-      setState(() => _countdown--);
+  void _refreshChallenge() {
+    if (!mounted || _step != 1) return;
+    final challenge = _account.loginChallenge;
+    if (challenge == null) {
+      _code.clear();
+      _countdownTimer?.cancel();
+      setState(() {
+        _step = 0;
+        _challenge = null;
+        _countdown = 0;
+      });
+      widget.onChanged();
+      return;
+    }
+    setState(() {
+      _challenge = challenge;
+      _method = challenge.selectedMethod;
+      _countdown = challenge.resendAfterSeconds;
     });
   }
 }

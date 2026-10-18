@@ -8,10 +8,7 @@ import 'package:flutter/services.dart';
 /// / `--build-number`；两者都在声明处被折进常量，没有一次运行期查询。
 /// 所以**升版本只改 `pubspec.yaml` 一处**。
 ///
-/// 它与 APK 的 `versionName` / `versionCode` 同源 —— `android/app/`
-/// 里那两行读的就是 `flutter.versionName` / `flutter.versionCode`，同一个
-/// `version:` 推出来的。应用里显示的版本号因此不可能与实际装着的那个包
-/// 不一致。
+/// 桌面打包工具同样读取 `pubspec.yaml`，保持显示版本与分发包版本一致。
 ///
 /// 兜底值只在**编译时拿不到这两项**时生效（`pubspec.yaml` 没有 `version:`，
 /// 而且构建时也没给 `--build-name`）—— 那意味着不是经 Flutter 工具编的。

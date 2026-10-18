@@ -207,59 +207,6 @@ class ShuSystemTile extends StatelessWidget {
   }
 }
 
-/// 系统 VPN 授权的**状态词与语义色**。
-///
-/// 三页要说同一句话：设置页的「系统授权状态」、引导页第 1 页的权限清单、
-/// 以及将来任何一处提到这件事的地方。写成一个函数而不是各页私有的一份
-/// switch，理由与 [ShuStatusSlot] 一样 —— 「已授权」这个词在哪儿都得是这四个
-/// 字、都得是 `accent` 蓝，否则用户要在每个页面各学一次读法。
-///
-/// 读法与账号管理里那几行凭据一致：可用是 `accent` 蓝、还没解决是
-/// `warning`、没有结论是中性灰。
-///
-/// 取值是 `bool?` 而不是自带头尾状态的原因：`null` 在这里有确切含义 ——
-/// **还没问过系统**（见 `ConnectionController.vpnPrepared`），与「问过，
-/// 没给」是两件事，不能合并成 false。
-///
-/// **永远不返回 null 颜色**：调用方多半把它塞进 [ShuStatusSlot]，而颜色为
-/// null 时那一格会退回到普通取值的样子（右对齐的次要文字）——同一个状态在
-/// 两种取值下长得不一样。
-({String text, Color color}) shuVpnPermissionStatus(
-  BuildContext context, {
-  required bool supported,
-  required bool? prepared,
-}) {
-  final colors = context.shuyoColors;
-  if (!supported) {
-    return (text: '仅 Android 支持', color: colors.textTertiary);
-  }
-  return switch (prepared) {
-    true => (text: '已授权', color: colors.accent),
-    false => (text: '未授权', color: colors.warning),
-    null => (text: '检查中…', color: colors.textTertiary),
-  };
-}
-
-/// 通知授权的**状态词与语义色**。
-///
-/// 读法与 [shuVpnPermissionStatus] 一致，只有「没拿到」那一格不同，而那是
-/// 有意的：通知**不挡任何东西** —— 拒绝它只是通知栏里少一条常驻通知，隧道
-/// 照常工作 —— 所以那里写中性灰的「可选」，不写 `warning` 的「未授权」。
-/// 用警示色说一件没有后果的事，是在谎报严重程度。
-///
-/// `null` 的含义与那边一样：**还没问过系统**。
-({String text, Color color}) shuNotificationPermissionStatus(
-  BuildContext context, {
-  required bool? granted,
-}) {
-  final colors = context.shuyoColors;
-  return switch (granted) {
-    true => (text: '已授权', color: colors.accent),
-    false => (text: '可选', color: colors.textTertiary),
-    null => (text: '检查中…', color: colors.textTertiary),
-  };
-}
-
 /// Neutral placeholder for a feature that has no data yet.
 class EmptyState extends StatelessWidget {
   const EmptyState({

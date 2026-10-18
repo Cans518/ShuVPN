@@ -243,44 +243,50 @@ Future<T?> showShuChoiceSheet<T>({
     builder: (sheetContext) {
       final colors = sheetContext.shuyoColors;
       return SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(
-                ShuSpacing.page,
-                0,
-                ShuSpacing.page,
-                8,
-              ),
-              child: Text(
-                title,
-                style: ShuYoTextStyles.sectionTitle(color: colors.textPrimary),
-              ),
-            ),
-            for (final option in options)
-              ListTile(
-                title: Text(
-                  option.label,
-                  style: ShuYoTextStyles.title(
-                    size: 15.5,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(
+                  ShuSpacing.page,
+                  0,
+                  ShuSpacing.page,
+                  8,
+                ),
+                child: Text(
+                  title,
+                  style: ShuYoTextStyles.sectionTitle(
                     color: colors.textPrimary,
                   ),
                 ),
-                subtitle: option.subtitle == null
-                    ? null
-                    : Text(
-                        option.subtitle!,
-                        style: ShuYoTextStyles.meta(color: colors.textTertiary),
-                      ),
-                trailing: option.value == current
-                    ? Icon(Icons.check, color: colors.accent)
-                    : null,
-                onTap: () => Navigator.of(sheetContext).pop(option.value),
               ),
-            const SizedBox(height: 8),
-          ],
+              for (final option in options)
+                ListTile(
+                  title: Text(
+                    option.label,
+                    style: ShuYoTextStyles.title(
+                      size: 15.5,
+                      color: colors.textPrimary,
+                    ),
+                  ),
+                  subtitle: option.subtitle == null
+                      ? null
+                      : Text(
+                          option.subtitle!,
+                          style: ShuYoTextStyles.meta(
+                            color: colors.textTertiary,
+                          ),
+                        ),
+                  trailing: option.value == current
+                      ? Icon(Icons.check, color: colors.accent)
+                      : null,
+                  onTap: () => Navigator.of(sheetContext).pop(option.value),
+                ),
+              const SizedBox(height: 8),
+            ],
+          ),
         ),
       );
     },

@@ -9,15 +9,14 @@ import '../../widgets/shu_app_bar.dart';
 /// 版式照 `ShuYo` 的 `_PermissionInfoPage`：页首一句总说明，下面一行一项权限
 /// （图标 + 名称 + 一句用途），页尾一句收尾。
 ///
-/// 条目按 ShuVPN 在 `AndroidManifest.xml` 里真实声明的权限重写。VPN 服务那
-/// 一项不在清单里 —— 它来自 `VpnService.prepare()` 的弹窗（见
-/// `welcome_page.dart` 的 `_ShuPermission.vpn`），但同样是用户会看到的一项授权。
+/// 说明桌面校园分流与网络访问所需权限。
 class PermissionInfoPage extends StatelessWidget {
   const PermissionInfoPage({super.key});
 
   @override
   Widget build(BuildContext context) {
     final colors = context.shuyoColors;
+    final platform = Theme.of(context).platform;
     return Scaffold(
       appBar: ShuAppBar(
         title: '权限说明',
@@ -32,15 +31,13 @@ class PermissionInfoPage extends StatelessWidget {
             style: ShuYoTextStyles.bodyCompact(color: colors.textSecondary),
           ),
           const SizedBox(height: 18),
-          const _PermissionItem(
-            icon: Icons.vpn_lock_outlined,
-            title: 'VPN 服务',
-            body: '由系统授权后建立隧道。拒绝这一项就无法连接。',
-          ),
-          const _PermissionItem(
-            icon: Icons.notifications_outlined,
-            title: '通知',
-            body: '隧道运行时在通知栏显示状态，并提供断开入口。',
+          _PermissionItem(
+            icon: Icons.admin_panel_settings_outlined,
+            title: 'VPN 权限',
+            body: platform == TargetPlatform.windows
+                ? '启用 VPN 时通过 Windows 管理员确认，创建虚拟网卡并设置所选模式的捕获路由。'
+                : '安装桌面权限组件并授权当前用户后，由组件创建虚拟网卡并设置所选模式的捕获路由。'
+                      '应用界面以普通用户运行。',
           ),
           const _PermissionItem(
             icon: Icons.language,
@@ -49,8 +46,8 @@ class PermissionInfoPage extends StatelessWidget {
           ),
           const SizedBox(height: 8),
           Text(
-            '你可以在系统设置中随时查看或更改已授予的权限。'
-            '拒绝某项权限只会影响对应功能。',
+            'HTTP 与 SOCKS5 代理无需 VPN 权限。'
+            '关闭 VPN 或退出应用时，会撤销本次建立的虚拟网卡与路由。',
             style: ShuYoTextStyles.meta(color: colors.textMuted, height: 1.5),
           ),
         ],

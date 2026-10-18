@@ -8,6 +8,8 @@ import 'package:flutter/material.dart';
 class ShuYoTextStyles {
   const ShuYoTextStyles._();
 
+  static const fontFamily = 'LXGWWenKaiScreen';
+
   static const TextTheme theme = TextTheme(
     displayLarge: TextStyle(
       fontSize: 22,
@@ -88,6 +90,7 @@ class ShuYoTextStyles {
 
   static TextStyle pageTitle({Color? color}) {
     return TextStyle(
+      fontFamily: fontFamily,
       fontSize: 19,
       height: 1.22,
       fontWeight: FontWeight.w600,
@@ -97,6 +100,7 @@ class ShuYoTextStyles {
 
   static TextStyle headerTitle({Color? color}) {
     return TextStyle(
+      fontFamily: fontFamily,
       fontSize: 17.5,
       height: 1.22,
       fontWeight: FontWeight.w600,
@@ -106,6 +110,7 @@ class ShuYoTextStyles {
 
   static TextStyle sectionTitle({Color? color}) {
     return TextStyle(
+      fontFamily: fontFamily,
       fontSize: 15.5,
       height: 1.24,
       fontWeight: FontWeight.w600,
@@ -120,6 +125,7 @@ class ShuYoTextStyles {
     FontWeight weight = FontWeight.w500,
   }) {
     return TextStyle(
+      fontFamily: fontFamily,
       fontSize: size,
       height: height,
       fontWeight: weight,
@@ -134,6 +140,7 @@ class ShuYoTextStyles {
     FontWeight weight = FontWeight.w400,
   }) {
     return TextStyle(
+      fontFamily: fontFamily,
       fontSize: size,
       height: height,
       fontWeight: weight,
@@ -148,6 +155,7 @@ class ShuYoTextStyles {
     FontWeight weight = FontWeight.w400,
   }) {
     return TextStyle(
+      fontFamily: fontFamily,
       fontSize: size,
       height: height,
       fontWeight: weight,
@@ -162,6 +170,7 @@ class ShuYoTextStyles {
     FontWeight weight = FontWeight.w400,
   }) {
     return TextStyle(
+      fontFamily: fontFamily,
       fontSize: size,
       height: height,
       fontWeight: weight,
@@ -176,6 +185,7 @@ class ShuYoTextStyles {
     FontWeight weight = FontWeight.w500,
   }) {
     return TextStyle(
+      fontFamily: fontFamily,
       fontSize: size,
       height: height,
       fontWeight: weight,
@@ -190,6 +200,7 @@ class ShuYoTextStyles {
     FontWeight weight = FontWeight.w500,
   }) {
     return TextStyle(
+      fontFamily: fontFamily,
       fontSize: size,
       height: height,
       fontWeight: weight,

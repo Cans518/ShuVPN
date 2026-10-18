@@ -18,6 +18,9 @@ class StubShuUpdateClient implements ShuUpdateClient {
   final List<String> requestedVersions = <String>[];
 
   @override
+  void close() {}
+
+  @override
   Future<ShuUpdateInfo?> checkForUpdate(String currentVersion) async {
     requestedVersions.add(currentVersion);
     final failure = error;
