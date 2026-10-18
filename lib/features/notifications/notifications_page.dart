@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show ScrollCacheExtent;
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
@@ -313,6 +314,7 @@ class _NotificationsPageState extends State<NotificationsPage> {
     final rows = <_ListRow>[const _NoticeRow()];
     var year = -1;
     var month = -1;
+    var itemIndex = 0;
     for (final item in _items) {
       final at = item.publishedAt;
       if (at != null && (at.year != year || at.month != month)) {
@@ -320,7 +322,7 @@ class _NotificationsPageState extends State<NotificationsPage> {
         month = at.month;
         rows.add(_MonthRow('$year年 $month月'));
       }
-      rows.add(_ItemRow(item));
+      rows.add(_ItemRow(item, itemIndex++));
     }
     _rows = rows;
   }
@@ -368,6 +370,7 @@ class _NotificationsPageState extends State<NotificationsPage> {
     return ListView.separated(
       controller: _scroll,
       physics: const AlwaysScrollableScrollPhysics(),
+      scrollCacheExtent: const ScrollCacheExtent.pixels(0),
       // 底部留出底栏的高度（`DockShell` 的 `extendBody` 会把内容垫到栏下面），
       // 续页那一行也落在这个内边距里。
       padding: const EdgeInsets.fromLTRB(
@@ -384,7 +387,9 @@ class _NotificationsPageState extends State<NotificationsPage> {
         return switch (_rows[index]) {
           _NoticeRow() => const _SourceNotice(),
           _MonthRow(:final label) => _MonthHeader(label),
-          _ItemRow(:final item) => _AnnouncementTile(
+          _ItemRow(:final item, :final index) => _AnnouncementTile(
+            key: ValueKey<String>(item.url.toString()),
+            index: index,
             item: item,
             preview: _previews[item.url.toString()],
             external: !isShuAnnouncementUrl(item.url),
@@ -544,9 +549,10 @@ class _MonthRow extends _ListRow {
 
 /// 一条公告。
 class _ItemRow extends _ListRow {
-  const _ItemRow(this.item);
+  const _ItemRow(this.item, this.index);
 
   final ShuAnnouncementListItem item;
+  final int index;
 }
 
 /// 月份小标题。
@@ -581,14 +587,17 @@ class _MonthHeader extends StatelessWidget {
 ///
 /// [external] 的那一条不会长高（它没有预览），行末也换一个图标：那一个是
 /// 「到外面去」而不是「展开详情」。
-class _AnnouncementTile extends StatelessWidget {
+class _AnnouncementTile extends StatefulWidget {
   const _AnnouncementTile({
+    super.key,
+    required this.index,
     required this.item,
     required this.preview,
     required this.external,
     required this.onTap,
   });
 
+  final int index;
   final ShuAnnouncementListItem item;
 
   /// 从正文开头摘的那两行；null = 还没预取到（或者预取失败）。
@@ -600,11 +609,49 @@ class _AnnouncementTile extends StatelessWidget {
   final VoidCallback onTap;
 
   @override
+  State<_AnnouncementTile> createState() => _AnnouncementTileState();
+}
+
+class _AnnouncementTileState extends State<_AnnouncementTile>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _entrance = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 280),
+  );
+  Timer? _entranceTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    _entranceTimer = Timer(Duration(milliseconds: (widget.index % 6) * 55), () {
+      if (mounted) _entrance.forward();
+    });
+  }
+
+  @override
+  void dispose() {
+    _entranceTimer?.cancel();
+    _entrance.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
+    return SlideTransition(
+      position: Tween<Offset>(
+        begin: const Offset(0.12, 0),
+        end: Offset.zero,
+      ).animate(CurvedAnimation(parent: _entrance, curve: Curves.easeOutCubic)),
+      child: FadeTransition(opacity: _entrance, child: _tile(context)),
+    );
+  }
+
+  Widget _tile(BuildContext context) {
     final colors = context.shuyoColors;
-    final text = preview;
+    final item = widget.item;
+    final text = widget.preview;
     return InkWell(
-      onTap: onTap,
+      onTap: widget.onTap,
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 15),
         child: Row(
@@ -649,8 +696,8 @@ class _AnnouncementTile extends StatelessWidget {
             ),
             const SizedBox(width: 10),
             Icon(
-              external ? Icons.open_in_new : Icons.chevron_right,
-              size: external ? 18 : 24,
+              widget.external ? Icons.open_in_new : Icons.chevron_right,
+              size: widget.external ? 18 : 24,
               color: colors.textMuted,
             ),
           ],
