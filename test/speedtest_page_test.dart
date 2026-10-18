@@ -120,6 +120,35 @@ class _PingRunner implements ShuSpeedTestRunner {
   }
 }
 
+class _ProgressRunner implements ShuSpeedTestRunner {
+  final Completer<void> _gate = Completer<void>();
+  late void Function(ShuSpeedTestProgress progress) _onUpdate;
+
+  @override
+  ShuSpeedTestServer get server => ShuSpeedTestServer.shu;
+
+  void emit(ShuSpeedTestPhase phase, double progress) {
+    _onUpdate(ShuSpeedTestProgress(phase: phase, progress: progress));
+  }
+
+  @override
+  void cancel() {
+    if (!_gate.isCompleted) _gate.complete();
+  }
+
+  @override
+  Future<ShuSpeedTestReport> run({
+    required void Function(ShuSpeedTestProgress progress) onUpdate,
+  }) async {
+    _onUpdate = onUpdate;
+    await _gate.future;
+    throw const ShuSpeedTestException(
+      '测速已停止',
+      kind: ShuSpeedTestFailure.cancelled,
+    );
+  }
+}
+
 Future<void> _pumpPage(
   WidgetTester tester,
   ShuSpeedTestRunner runner, {
@@ -136,13 +165,17 @@ Future<void> _pumpPage(
   );
 }
 
-/// 表盘的目标值（0..1）。页面里只有表盘这一个补间。
+/// 表盘的目标值（0..1）。顶栏进度条的补间先于表盘出现在树中。
 double _gaugeTarget(WidgetTester tester) {
   final gauge = tester.widget<TweenAnimationBuilder<double>>(
-    find.byType(TweenAnimationBuilder<double>),
+    find.byType(TweenAnimationBuilder<double>).last,
   );
   return gauge.tween.end!;
 }
+
+double _barProgress(WidgetTester tester) => tester
+    .widget<LinearProgressIndicator>(find.byType(LinearProgressIndicator))
+    .value!;
 
 void main() {
   // 上一轮结果记在进程内的历史里，测试之间必须互相清干净。
@@ -210,6 +243,43 @@ void main() {
     expect(find.text('0.00'), findsNothing);
     // 只剩下面下载 / 上传两格各一个。
     expect(find.text('Mbps'), findsNWidgets(2));
+  });
+
+  testWidgets('顶栏进度在采样间补间，阶段结束时先缩回零', (tester) async {
+    final runner = _ProgressRunner();
+    await _pumpPage(tester, runner);
+    await tester.tap(find.text('开始测速'));
+    await tester.pump();
+
+    runner.emit(ShuSpeedTestPhase.download, 0);
+    await tester.pump();
+    runner.emit(ShuSpeedTestPhase.download, 0.5);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 60));
+    expect(_barProgress(tester), inExclusiveRange(0, 0.5));
+    await tester.pump(const Duration(milliseconds: 80));
+    expect(_barProgress(tester), closeTo(0.5, 1e-3));
+
+    runner.emit(ShuSpeedTestPhase.upload, 0);
+    await tester.pump();
+    expect(_barProgress(tester), greaterThan(0));
+    await tester.pump(const Duration(milliseconds: 160));
+    expect(_barProgress(tester), inExclusiveRange(0, 0.5));
+    await tester.pump(const Duration(milliseconds: 180));
+    expect(_barProgress(tester), closeTo(0, 1e-3));
+
+    runner.emit(ShuSpeedTestPhase.upload, 0.5);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 140));
+    expect(_barProgress(tester), closeTo(0.5, 1e-3));
+
+    runner.emit(ShuSpeedTestPhase.done, 1);
+    await tester.pump();
+    expect(_barProgress(tester), greaterThan(0));
+    await tester.pump(const Duration(milliseconds: 160));
+    expect(_barProgress(tester), inExclusiveRange(0, 0.5));
+    await tester.pump(const Duration(milliseconds: 180));
+    expect(_barProgress(tester), closeTo(0, 1e-3));
   });
 
   testWidgets('离开页面再进来仍显示上一轮结果', (tester) async {

@@ -103,6 +103,7 @@ class _SpeedTestPageState extends State<SpeedTestPage> {
           phase: _error == null ? _phase : ShuSpeedTestPhase.idle,
           progress: _progress.progress,
           color: _phaseColor(colors),
+          reduceMotion: reduceMotion,
         ),
       ),
       body: SafeArea(
@@ -515,34 +516,78 @@ double _gaugeAmount(double mbps) {
 ///
 /// 槽位由 [ShuAppBar.bottom] 常驻占住 3 像素，所以这里不画的时候也只能
 /// 返回一个空盒子，而不是让页面塌一节。
-class _SpeedProgressBar extends StatelessWidget {
+class _SpeedProgressBar extends StatefulWidget {
   const _SpeedProgressBar({
     required this.phase,
     required this.progress,
     required this.color,
+    required this.reduceMotion,
   });
 
   final ShuSpeedTestPhase phase;
   final double progress;
   final Color color;
+  final bool reduceMotion;
+
+  @override
+  State<_SpeedProgressBar> createState() => _SpeedProgressBarState();
+}
+
+class _SpeedProgressBarState extends State<_SpeedProgressBar> {
+  bool _retracting = false;
+  Color? _retractColor;
+
+  @override
+  void didUpdateWidget(covariant _SpeedProgressBar oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.reduceMotion) {
+      _retracting = false;
+    } else if (oldWidget.phase != widget.phase) {
+      _retracting =
+          (oldWidget.phase == ShuSpeedTestPhase.download &&
+              widget.phase == ShuSpeedTestPhase.upload) ||
+          (oldWidget.phase == ShuSpeedTestPhase.upload &&
+              widget.phase == ShuSpeedTestPhase.done);
+      if (_retracting) _retractColor = oldWidget.color;
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
-    return switch (phase) {
+    return switch (widget.phase) {
       ShuSpeedTestPhase.ping => LinearProgressIndicator(
         minHeight: _progressBarHeight,
         backgroundColor: Colors.transparent,
-        color: color,
+        color: widget.color,
       ),
       ShuSpeedTestPhase.download ||
-      ShuSpeedTestPhase.upload => LinearProgressIndicator(
-        value: progress.clamp(0.0, 1.0),
-        minHeight: _progressBarHeight,
-        backgroundColor: Colors.transparent,
-        color: color,
+      ShuSpeedTestPhase.upload ||
+      ShuSpeedTestPhase.done => TweenAnimationBuilder<double>(
+        // 采样约每 50 ms 到一帧；补间稍长一点，让条在两帧之间继续移动。
+        // 阶段切换先向 0 缩回；上传的进度在缩完后再从 0 向前走。
+        tween: Tween<double>(
+          begin: 0,
+          end: _retracting || widget.phase == ShuSpeedTestPhase.done
+              ? 0
+              : widget.progress.clamp(0.0, 1.0),
+        ),
+        duration: widget.reduceMotion
+            ? Duration.zero
+            : _retracting || widget.phase == ShuSpeedTestPhase.done
+            ? const Duration(milliseconds: 320)
+            : const Duration(milliseconds: 120),
+        curve: Curves.linear,
+        onEnd: () {
+          if (_retracting && mounted) setState(() => _retracting = false);
+        },
+        builder: (context, value, _) => LinearProgressIndicator(
+          value: value,
+          minHeight: _progressBarHeight,
+          backgroundColor: Colors.transparent,
+          color: _retracting ? _retractColor : widget.color,
+        ),
       ),
-      ShuSpeedTestPhase.idle ||
-      ShuSpeedTestPhase.done => const SizedBox.shrink(),
+      ShuSpeedTestPhase.idle => const SizedBox.shrink(),
     };
   }
 }
