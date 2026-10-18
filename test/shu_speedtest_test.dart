@@ -42,8 +42,8 @@ void main() {
     // 站点是 6 / 3；实测 8 / 6 才能把链路跑满（见字段注释）。
     expect(tuning.downloadStreams, 8);
     expect(tuning.uploadStreams, 6);
-    expect(tuning.downloadDuration, const Duration(seconds: 20));
-    expect(tuning.uploadDuration, const Duration(seconds: 20));
+    expect(tuning.downloadDuration, const Duration(seconds: 10));
+    expect(tuning.uploadDuration, const Duration(seconds: 10));
     expect(tuning.downloadGrace, const Duration(milliseconds: 1500));
     expect(tuning.uploadGrace, const Duration(seconds: 3));
     expect(tuning.downloadChunkMiB, 100);
@@ -55,7 +55,7 @@ void main() {
     expect(tuning.streamStagger, const Duration(milliseconds: 300));
     expect(tuning.initialDelay, const Duration(seconds: 1));
     expect(tuning.overheadFactor, 1.06);
-    // 站点的 time_auto 会在快链路上把 20 秒缩到四秒，这里关掉，跑满窗口。
+    // 站点的 time_auto 会在快链路上缩短测速时间，这里关掉，跑满窗口。
     expect(tuning.autoShorten, isFalse);
   });
 

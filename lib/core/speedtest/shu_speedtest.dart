@@ -120,7 +120,7 @@ class ShuSpeedTestServer {
 /// 300 毫秒的流启动间隔，以及 `test_order` 里 IP 之后的 1 秒等待。
 ///
 /// 偏离站点的地方都写在对应字段的注释上，逐条是：并发（8 / 6，站点 6 / 3）、
-/// 上行分片（256 KiB）、测量时长（20 秒）、关闭自动缩短、采样间隔（50 毫秒）、
+/// 上行分片（256 KiB）、测量时长（10 秒）、关闭自动缩短、采样间隔（50 毫秒）、
 /// 上行正文（1 MiB —— 站点 nginx 的 `client_max_body_size` 只有 1m）。
 ///
 /// 站点还开了 `enable_quirks`：Chrome 会把下行流改成 5，Chrome 移动端会把
@@ -131,8 +131,8 @@ class ShuSpeedTestTuning {
   const ShuSpeedTestTuning({
     this.pingCount = 10,
     this.pingTimeout = const Duration(seconds: 4),
-    this.downloadDuration = const Duration(seconds: 20),
-    this.uploadDuration = const Duration(seconds: 20),
+    this.downloadDuration = const Duration(seconds: 10),
+    this.uploadDuration = const Duration(seconds: 10),
     this.downloadGrace = const Duration(milliseconds: 1500),
     this.uploadGrace = const Duration(seconds: 3),
     this.downloadStreams = 8,
@@ -159,8 +159,8 @@ class ShuSpeedTestTuning {
 
   /// 下载 / 上行的测量时长，对应 `time_dl_max` / `time_ul_max`。
   ///
-  /// 这里取 20 秒，比站点的 15 秒长：15 秒里前面还要扣掉 1.5 / 3 秒的宽限，
-  /// 真正在计量的窗口只剩一半多，读数会随几秒内的瞬时波动大幅摇摆。
+  /// 这里各取 10 秒。正常收到数据时，宽限结束会重置计时起点，
+  /// 因此下行 / 上行实际各跑约 11.5 / 13 秒（另有网络与阶段切换耗时）。
   final Duration downloadDuration;
   final Duration uploadDuration;
 
@@ -225,7 +225,7 @@ class ShuSpeedTestTuning {
   ///
   /// 站点的算法是每 200 毫秒按 `5 × speed / 100000` 缩短测量窗口、单次最多
   /// 400 毫秒。400 Mbps 的链路上这意味着每 200 毫秒花掉 400 毫秒的窗口，
-  /// 20 秒的测量四秒就收尾了 —— 正是「测得太短」的来源。这里关掉它，
+  /// 10 秒的测量很快就会收尾 —— 正是「测得太短」的来源。这里关掉它，
   /// 每个阶段真的跑满 [downloadDuration] / [uploadDuration]。
   final bool autoShorten;
 
