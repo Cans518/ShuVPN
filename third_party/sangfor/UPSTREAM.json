@@ -1,0 +1,41 @@
+{
+  "schema": 1,
+  "repository": "https://github.com/preca-hoshino/flutter_sangfor",
+  "revision": "91a7efb2533ae87708ce6c221b3dea4d7fdf1098",
+  "license": "MIT",
+  "files": {
+    "sangfor-core/Cargo.toml": "d629a734a41d04ce2b0f21cded17f693ed965d1db7851c5d4f1cd20837fd07ad",
+    "sangfor-core/src/crypto.rs": "5391c7a9f901876a95334cde1947268f54a645c8e409b6da5bb2698080b204d3",
+    "sangfor-core/src/error.rs": "1ce9700ae99f0ad9461bc408d8366cd85ddcd421c5a6f3a844d5f259138ef281",
+    "sangfor-core/src/flow.rs": "edf5e9ba6b9e2e9e79c6ab2e26d49b09070b5b74c96c4705c17588cdaaeb820a",
+    "sangfor-core/src/json.rs": "ac2d6c91e62b36a60990bf4fbc4dd495fc041dc2dd0ff2b2857e71efbb9a1bf8",
+    "sangfor-core/src/l3.rs": "e9192d7d488e00c4ee31d04eab13a6343880edc054729c0e1ce1274c47ab05e4",
+    "sangfor-core/src/lib.rs": "3e3860f51dafb9e894d739e64f662b8c8f9aa1d44fd350d5dcd0cf80c5dbd99a",
+    "sangfor-core/src/packet.rs": "d7961b8f92af5769eb6eddfb6c6ee07fdd8b7fe96f61b71f304831bc118fe021",
+    "sangfor-core/src/plan.rs": "7df739c1cf2e0a28b6a06c0b9724341ecaca12ea250f82939ba5d8670f62edef",
+    "sangfor-core/src/plane.rs": "a5e1395fe97c06cb7ba3c90466c2c8eafc2723327748398fe6ad20c6ef9e673a",
+    "sangfor-core/src/relay.rs": "fbb637c289383bde6ad2a13ba9b4f2b97101993fd0b684fbf715a48beda07e57",
+    "sangfor-core/src/route.rs": "bebfbe056dc4bf3653eb08816f42805c9b7e165b0e6a4f933ae378c8469f8932",
+    "sangfor-core/src/tcp_tunnel.rs": "205b9981e7f429671f5301e965de705f388a5f8018ea622f99ac940e1f1235bf",
+    "sangfor-core/src/terminator.rs": "dbbf36fca299c2c92a9298fd6e5647ee22ae46e4e3ebb4cd2310826684d7f89e",
+    "sangfor-core/tests/golden.rs": "385a4fbbaff67b4c3f6a5df1c910911a324fb4e2cb7e79e05b12ee4ef08bc8b1",
+    "sangfor-core/tests/plane.rs": "507e7243e8c0770026a259340d546207c643931231005833d03bb22fb4412b00",
+    "sangfor-core/tests/terminator.rs": "a0a5ffed89e09f17e06ac16d3f653801d92df9d4ea3f1c7fc0d8586f80fadfe2",
+    "sangfor-tls/Cargo.toml": "66cdf4731478b1644bdcd93b608496385e84bc4daaf921525d1da0066ad3a6a9",
+    "sangfor-tls/src/channel.rs": "945de3fae6e25727cb5d9ea5b64dc4dd62f466f360730ae1ef0f9e243c114463",
+    "sangfor-tls/src/lib.rs": "664fbbdaf060a9c9e231000caa3ccd4d92cd9cf21bd314ada3a0e663ec0406eb",
+    "sangfor-tls/src/tests.rs": "5ba1818e56acb628bfdc88f6b84fe6aa633c80143ef5fe35aac37044e25f38bd",
+    "sangfor-tls/src/trust.rs": "1bc8e11cafb975888ee2b0b04c2245f41a35e09f66974a4e7739de43cad95465",
+    "LICENSE": "41d071930fb5afd102cbb6e6be676674cd1cdf047b919155c286a1752203ada0",
+    "sangfor-core/tests/fixtures/native_atrust.json": "29e8faf248d5e0289925cd6d6d17366b0136aacf5d302cbf972d258d94b71195"
+  },
+  "localPatches": [
+    "sangfor-core/Cargo.toml",
+    "sangfor-tls/Cargo.toml",
+    "sangfor-core/src/lib.rs",
+    "sangfor-core/src/plan.rs",
+    "sangfor-core/src/relay.rs",
+    "sangfor-core/tests/golden.rs",
+    "sangfor-core/tests/plane.rs"
+  ]
+}

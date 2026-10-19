@@ -140,7 +140,7 @@ pub async fn verify_windows(probe: WindowsProbe) -> anyhow::Result<String> {
     network::windows_probe::verify(probe).await
 }
 
-/// Called only by the feature-gated example, never through FRB.
+/// Called only by the feature-gated example.
 pub async fn verify(
     host: String,
     url: String,

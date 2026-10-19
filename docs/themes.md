@@ -1,0 +1,52 @@
+# 自定义主题
+
+主题接口使用 JSON，分别定义浅色和深色配色。在“设置 → 你的配色 → 编辑或导入自定义主题”导入，确认预览后保存。导出按钮保存当前编辑的内容，可用于分享或备份。
+
+```json
+{
+  "name": "山岚",
+  "light": {
+    "accent": "#19745d",
+    "canvas": "#f2f7f5",
+    "surface": "#ffffff",
+    "ink": "#243d36",
+    "muted": "#526e64",
+    "border": "#d6e4dc"
+  },
+  "dark": {
+    "accent": "#79d8b6",
+    "canvas": "#14231e",
+    "surface": "#1e3028",
+    "ink": "#e5f3eb",
+    "muted": "#a3bcaf",
+    "border": "#354c40"
+  }
+}
+```
+
+| 字段 | 用途 |
+| --- | --- |
+| `name` | 1–32 字符的主题名称 |
+| `accent` | 主按钮、选中项、链接与焦点 |
+| `canvas` | 窗口背景 |
+| `surface` | 卡片、表单与标题栏 |
+| `ink` | 正文 |
+| `muted` | 提示与次要文字 |
+| `border` | 边框与分隔线 |
+
+颜色必须是 `#RRGGBB`，不能注入 CSS、URL 或脚本；导入文件上限为 16 KiB。主按钮文字会根据主题色自动选择黑色或白色。建议正文与背景至少保持 4.5:1 对比度，并在两种外观下检查焦点和禁用状态。
+
+宿主 commands `appearance_current`、`appearance_save` 读写以下数据：
+
+```json
+{
+  "palette": "custom",
+  "customTheme": {
+    "name": "主题名称",
+    "light": { "accent": "#2864ad", "canvas": "#f3f6fb", "surface": "#ffffff", "ink": "#25364b", "muted": "#5c6b80", "border": "#dce4ef" },
+    "dark": { "accent": "#99c2ff", "canvas": "#141c29", "surface": "#1c2838", "ink": "#e5edf8", "muted": "#a6b7cd", "border": "#35465d" }
+  }
+}
+```
+
+`palette` 接受 `ocean`、`jade`、`iris`、`amber` 或 `custom`。宿主再次校验字段和颜色；保存失败时保持上一次配置。主题保存在应用数据目录中的 `appearance.json`，与网络和账户配置分开。

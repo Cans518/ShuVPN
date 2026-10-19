@@ -1,22 +1,9 @@
-name: Native core and desktop
+name: Rust core and Tauri desktop
 
 on:
   push:
-    branches: [main, "refactor/**"]
-    paths:
-      - "rust/**"
-      - "rust_builder/**"
-      - "lib/**"
-      - "assets/**"
-      - "test/**"
-      - "tool/**"
-      - "windows/**"
-      - "linux/**"
-      - "pubspec.*"
-      - "flutter_rust_bridge.yaml"
-      - "analysis_options.yaml"
-      - "docs/dart_backend_boundary_manifest.json"
-      - ".github/workflows/native-core.yml"
+    branches: [main, "release/**"]
+    paths: ["rust/**", "third_party/**", "desktop/**", "packaging/**", "tool/**", "test/**", ".github/**"]
   pull_request:
     branches: [main]
 
@@ -29,253 +16,81 @@ concurrency:
 
 jobs:
   build-and-verify:
-    defaults:
-      run:
-        shell: bash
     strategy:
       fail-fast: false
       matrix:
         os: [windows-latest, ubuntu-22.04]
     runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@v7
-      - name: Verify reviewed Dart backend boundary
-        run: |
-          python -m unittest discover -s test/tool -p test_dart_boundary.py
-          python tool/verify_dart_boundary.py
-      - uses: subosito/flutter-action@v2
+      - uses: actions/setup-node@v4
         with:
-          flutter-version: "3.47.2"
-          channel: stable
-          cache: true
-      - name: Install Linux desktop dependencies
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Linux desktop and native test dependencies
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev libstdc++-12-dev libayatana-appindicator3-dev gsettings-desktop-schemas dconf-service libkf5config-bin libkf5kio-dev kio libcap2-bin python3-gi gir1.2-atspi-2.0 xvfb xdotool openbox xfce4-panel xauth dbus-x11
-      - name: Set up Rust
+          sudo apt-get install -y --no-install-recommends libwebkit2gtk-4.1-dev librsvg2-dev libayatana-appindicator3-dev pkg-config libcap2-bin iproute2 python3-gi gir1.2-atspi-2.0 xvfb xdotool xauth x11-utils dbus-x11
+      - name: Rust toolchain
         run: |
-          rustup update stable --no-self-update
-          rustup default stable
-          rustup component add rustfmt clippy
-      - name: Verify desktop packaging
-        run: python -m unittest discover -s test/tool -p 'test_package*.py'
-      - name: Verify desktop GUI acceptance guards
-        run: python -m unittest discover -s test/tool -p 'test_*desktop*acceptance.py'
-      - name: Verify Full probe contracts and independent peer
-        run: |
-          python -m unittest discover -s test/tool -p 'test_*full*.py'
-          cargo test --manifest-path rust/Cargo.toml --locked --all-features --example desktop_windows_full_smoke
-      - name: Verify Linux installation transactions
-        if: runner.os == 'Linux'
-        run: python3 -m unittest discover -s test/tool -p 'test_linux_install.py'
-      - name: Verify Rust
+          rustup toolchain install 1.96.0 --profile minimal --component rustfmt --component clippy
+          rustup default 1.96.0
+      - run: npm ci --prefix desktop
+      - run: python tool/release.py check
+      - run: npm run build --prefix desktop
+      - name: Native formats, lint and packaging contracts
         run: |
           cargo fmt --manifest-path rust/Cargo.toml --check
+          cargo fmt --manifest-path desktop/src-tauri/Cargo.toml --check
           cargo clippy --manifest-path rust/Cargo.toml --locked --all-targets --all-features -- -D warnings
-      - name: Verify Windows Rust tests
+          cargo clippy --manifest-path desktop/src-tauri/Cargo.toml --target-dir rust/target --locked --all-targets -- -D warnings
+          python -m unittest discover -s test/tool -p 'test_*.py'
+          cargo test --manifest-path third_party/sangfor/Cargo.toml --target-dir rust/target --workspace --locked
+      - name: Windows core and Tauri tests
         if: runner.os == 'Windows'
-        run: cargo test --manifest-path rust/Cargo.toml --locked --all-features
-      - name: Verify Linux Rust tests in an isolated network as an ordinary user
+        env:
+          SHUVPN_WINTUN_DLL: ${{ github.workspace }}/desktop/resources/wintun/amd64/wintun.dll
+        run: |
+          cargo test --manifest-path rust/Cargo.toml --locked --all-features --all-targets
+          cargo test --manifest-path desktop/src-tauri/Cargo.toml --target-dir rust/target --locked --all-targets
+      - name: Linux native tests in an isolated network
         if: runner.os == 'Linux'
-        run: sudo bash tool/rust_linux_namespace_tests.sh "$(id -un)" "$(command -v cargo)" --locked --all-features
-      - name: Build Rust release examples
+        run: |
+          sudo bash tool/rust_linux_namespace_tests.sh "$(id -un)" "$(command -v cargo)" --locked --all-features --all-targets
+          cargo test --manifest-path desktop/src-tauri/Cargo.toml --target-dir rust/target --locked --all-targets
+      - name: Linux TUN, DNS, egress and helper cleanup
+        if: runner.os == 'Linux'
         run: |
           cargo build --manifest-path rust/Cargo.toml --locked --release --lib --examples
-      - name: Verify Linux TUN packets and rollback in isolated namespaces
-        if: runner.os == 'Linux'
-        run: |
           sudo bash tool/tun_linux_namespace_smoke.sh
           sudo bash tool/tun_dns_linux_smoke.sh
           sudo unshare --net python3 tool/tun_data_plane_linux_smoke.py
-          cargo build --manifest-path rust/Cargo.toml --locked --release --features egress-probe --example egress_namespace_smoke
+          cargo build --manifest-path rust/Cargo.toml --locked --release --features tun-probe,egress-probe --bin shuvpn_tun_helper --examples
           sudo unshare --net python3 tool/tun_data_plane_linux_smoke.py --egress
-          cargo build --manifest-path rust/Cargo.toml --locked --release --features tun-probe --bin shuvpn_tun_helper --example linux_tun_helper_smoke
           sudo bash tool/tun_linux_helper_smoke.sh
-          cargo build --manifest-path rust/Cargo.toml --locked --release --features tun-probe,egress-probe --bin shuvpn_tun_helper --example packet_namespace_smoke
           sudo unshare --net python3 tool/tun_data_plane_linux_smoke.py --desktop-helper rust/target/release rust/target/release/shuvpn_tun_helper
           sudo unshare --net python3 tool/tun_data_plane_linux_smoke.py --desktop-helper-crash rust/target/release rust/target/release/shuvpn_tun_helper
-          cargo build --manifest-path rust/Cargo.toml --locked --release --lib --examples
-      - run: flutter pub get --enforce-lockfile
-      - name: Verify Dart and the real native bridge
-        env:
-          SHUVPN_WINTUN_DLL: ${{ github.workspace }}/windows/third_party/wintun/amd64/wintun.dll
+      - name: Build desktop and helper
         run: |
-          flutter analyze
-          flutter test
-          dart run tool/rust_bridge_smoke.dart
-      - name: Verify the real Linux TUN bridge in an isolated namespace
+          cargo build --manifest-path desktop/src-tauri/Cargo.toml --target-dir rust/target --locked --features tauri/custom-protocol --bin shuvpn
+          cargo build --manifest-path rust/Cargo.toml --locked --bin shuvpn_tun_helper
+          mkdir -p build/desktop/tauri
+      - name: Windows real WebView
+        if: runner.os == 'Windows'
+        run: node tool/tauri_windows_smoke.mjs rust/target/debug/shuvpn.exe build/desktop/tauri/webview
+      - name: Linux real WebKit
         if: runner.os == 'Linux'
-        run: |
-          dart_runtime="$(dirname "$(readlink -f "$(command -v flutter)")")/cache/dart-sdk/bin/dart"
-          sudo unshare --net "$dart_runtime" run tool/tun_bridge_smoke.dart
-          sudo unshare --net "$dart_runtime" run tool/tun_dns_bridge_smoke.dart
-          flutter_root="$(dirname "$(dirname "$(readlink -f "$(command -v flutter)")")")"
-          sudo env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY -u http_proxy -u https_proxy -u all_proxy \
-            NO_PROXY='*' no_proxy='*' GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.directory "GIT_CONFIG_VALUE_0=$flutter_root" \
-            unshare --net bash -c 'ip link set lo up; exec "$@"' adapter \
-            "$dart_runtime" "$flutter_root/bin/cache/flutter_tools.snapshot" \
-            test --no-pub tool/full_capture_adapter_smoke.dart
-      - name: Verify generated bindings
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          cargo install flutter_rust_bridge_codegen --version 2.11.1 --locked
-          ./tool/generate_rust_bridge.ps1
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          git diff --exit-code -- rust/src/frb_generated.rs lib/core/rust/generated
-      - name: Build Windows bundle
-        if: runner.os == 'Windows'
-        env:
-          FRB_DART_LOAD_EXTERNAL_LIBRARY_NATIVE_LIB_DIR: ${{ github.workspace }}/build/windows/x64/runner/Release
-          SHUVPN_TEST_TUN_HELPER: ${{ github.workspace }}/build/windows/x64/runner/Release/shuvpn_tun_helper.exe
-        run: |
-          flutter build windows --release
-          cmake --build build/windows/x64 --config Release --target shuvpn_tray_menu_test
-          build/windows/x64/Release/shuvpn_tray_menu_test.exe
-          dart run tool/rust_bridge_smoke.dart build/windows/x64/runner/Release/shuvpn_core.dll
-          dart run tool/newsso_storage_smoke.dart build/windows/x64/runner/Release/shuvpn_core.dll
-          dart run tool/account_storage_smoke.dart build/windows/x64/runner/Release/shuvpn_core.dll
-          dart run tool/settings_storage_smoke.dart build/windows/x64/runner/Release/shuvpn_core.dll
-          flutter test test/native
-          cargo test --manifest-path rust/Cargo.toml --locked --all-features --test windows_tun_helper
-          python tool/package_desktop.py build --platform windows --bundle build/windows/x64/runner/Release
-      - name: Verify Windows system proxy and crash recovery
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: ./tool/system_proxy_windows_smoke.ps1 -LibraryPath build/windows/x64/runner/Release/shuvpn_core.dll
-      - name: Build and verify Windows installer
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          $compiler = ./tool/install_inno_setup.ps1
-          $archive = @(Get-ChildItem build/desktop/*-windows-x64.zip)
-          if ($archive.Count -ne 1) { throw 'Expected one Windows archive' }
-          python tool/package_installers.py $archive[0].FullName --output build/desktop --iscc $compiler
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          Expand-Archive -LiteralPath $archive[0].FullName -DestinationPath build/desktop/windows-installer-input
-          $bundle = Join-Path 'build/desktop/windows-installer-input' $archive[0].BaseName
-          $installer = @(Get-ChildItem build/desktop/*-windows-x64-setup.exe)
-          ./tool/windows_installer_smoke.ps1 -InstallerPath $installer[0].FullName -BundlePath $bundle -IsccPath $compiler -ReportDirectory build/desktop/windows-installer-smoke
-      - name: Build Linux bundle
-        if: runner.os == 'Linux'
-        env:
-          FRB_DART_LOAD_EXTERNAL_LIBRARY_NATIVE_LIB_DIR: ${{ github.workspace }}/build/linux/x64/release/bundle/lib
-        run: |
-          flutter build linux --release
-          cmake --build build/linux/x64/release --target shuvpn_tray_menu_test
-          xvfb-run -a build/linux/x64/release/shuvpn_tray_menu_test
-          cmake --build build/linux/x64/release --target shuvpn_view_accessibility_test
-          xvfb-run -a dbus-run-session build/linux/x64/release/shuvpn_view_accessibility_test
-          dart_runtime="$(dirname "$(readlink -f "$(command -v flutter)")")/cache/dart-sdk/bin/dart"
-          python3 tool/desktop_rule_acceptance.py --bundle "$PWD/build/linux/x64/release/bundle" \
-            --report "$PWD/build/desktop/gui-acceptance" --dart "$dart_runtime"
-          python3 tool/desktop_rule_management_acceptance.py --bundle "$PWD/build/linux/x64/release/bundle" \
-            --report "$PWD/build/desktop/rule-management-acceptance" --dart "$dart_runtime"
-          python3 tool/desktop_rule_drag_acceptance.py --bundle "$PWD/build/linux/x64/release/bundle" \
-            --report "$PWD/build/desktop/rule-drag-acceptance" --dart "$dart_runtime"
-          python3 tool/desktop_tray_acceptance.py --bundle "$PWD/build/linux/x64/release/bundle" \
-            --report "$PWD/build/desktop/tray-acceptance" --dart "$dart_runtime"
-          sudo bash tool/tun_linux_helper_smoke.sh rust/target/release build/linux/x64/release/bundle/shuvpn_tun_helper
-          dart run tool/rust_bridge_smoke.dart build/linux/x64/release/bundle/lib/libshuvpn_core.so
-          dart run tool/newsso_storage_smoke.dart build/linux/x64/release/bundle/lib/libshuvpn_core.so
-          dart run tool/account_storage_smoke.dart build/linux/x64/release/bundle/lib/libshuvpn_core.so
-          dart run tool/settings_storage_smoke.dart build/linux/x64/release/bundle/lib/libshuvpn_core.so
-          flutter test test/native
-          dart_runtime="$(dirname "$(readlink -f "$(command -v flutter)")")/cache/dart-sdk/bin/dart"
-          native_library="$PWD/build/linux/x64/release/bundle/lib/libshuvpn_core.so"
-          sudo unshare --net "$dart_runtime" run tool/tun_bridge_smoke.dart "$native_library"
-          sudo unshare --net "$dart_runtime" run tool/tun_dns_bridge_smoke.dart "$native_library"
-          bash tool/system_proxy_linux_smoke.sh build/linux/x64/release/bundle/lib/libshuvpn_core.so
-          cmake -S tool/kde_proxy_consumer -B build/kde-proxy-consumer
-          cmake --build build/kde-proxy-consumer
-          dart compile exe tool/system_proxy_bridge_smoke.dart -o build/kde-proxy-consumer/system_proxy_bridge_smoke
-          bash tool/system_proxy_kde_smoke.sh build/kde-proxy-consumer/kde_proxy_consumer build/kde-proxy-consumer/system_proxy_bridge_smoke
-          python tool/package_desktop.py build --platform linux --bundle build/linux/x64/release/bundle
-          archive=(build/desktop/*-linux-x64.tar.gz)
-          test "${#archive[@]}" -eq 1
-          mkdir -p build/desktop/install-extracted
-          tar -xzf "${archive[0]}" -C build/desktop/install-extracted
-          bundle="$PWD/build/desktop/install-extracted/$(basename "${archive[0]}" .tar.gz)"
-          dart compile exe tool/linux_install_smoke.dart -o build/desktop/linux-install-ffi
-          dart compile exe tool/tun_dns_bridge_smoke.dart -o build/desktop/linux-installed-tun-ffi
-          sudo bash tool/linux_install_smoke.sh "$bundle" "$PWD/build/desktop/linux-install-ffi" "$(id -un)" \
-            "$PWD/build/desktop/linux-installed-tun-ffi" "$PWD/rust/target/release/examples/proxy_fixture"
-          python3 tool/package_installers.py "${archive[0]}" --output build/desktop
-          deb=(build/desktop/*-linux-x64.deb)
-          test "${#deb[@]}" -eq 1
-          flutter_root="$(dirname "$(dirname "$(readlink -f "$(command -v flutter)")")")"
-          sudo env SHUVPN_DART_RUNTIME="$dart_runtime" SHUVPN_DEB_FLUTTER_ROOT="$flutter_root" \
-            SHUVPN_DEB_FULL_REPORT="$PWD/build/desktop/linux-installed-full" \
-            SHUVPN_DEB_GUI_REPORT="$PWD/build/desktop/linux-installed-gui" SHUVPN_DEB_GUI_ACCEPTANCE=1 \
-            SHUVPN_DEB_TRAY_REPORT="$PWD/build/desktop/linux-installed-tray" \
-            bash tool/linux_deb_smoke.sh "${deb[0]}" "$PWD/build/desktop/linux-install-ffi" "$(id -un)" \
-            "$PWD/build/desktop/linux-installed-tun-ffi" "$PWD/rust/target/release/examples/proxy_fixture"
-      - name: Verify connected Linux GUI with the local native fixture
-        if: runner.os == 'Linux'
-        run: |
-          restore_production() {
-            status=$?
-            trap - EXIT
-            flutter build linux --release --target lib/main.dart || exit 1
-            exit "$status"
-          }
-          trap restore_production EXIT
-          flutter build linux --release --target tool/connected_desktop_app.dart
-          cp -a build/linux/x64/release/bundle build/desktop/connected-fixture-bundle
-          dart_runtime="$(dirname "$(readlink -f "$(command -v flutter)")")/cache/dart-sdk/bin/dart"
-          sudo python3 tool/connected_desktop_namespace.py --user "$(id -un)" \
-            --bundle "$PWD/build/desktop/connected-fixture-bundle" \
-            --fixture "$PWD/rust/target/release/examples/proxy_fixture" \
-            --dart "$dart_runtime" --report "$PWD/build/desktop/connected-gui"
+        run: xvfb-run -a -s "-screen 0 1024x900x24" dbus-run-session -- /usr/bin/python3 tool/tauri_linux_smoke.py --executable "$PWD/rust/target/debug/shuvpn" --report "$PWD/build/desktop/tauri/webview"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: desktop-${{ runner.os }}
-          path: |
-            build/desktop/*.zip
-            build/desktop/*.tar.gz
-            build/desktop/*.sha256
-            build/desktop/*-setup.exe
-            build/desktop/*.deb
-            build/desktop/*.json
-            build/desktop/gui-acceptance/*.png
-            build/desktop/gui-acceptance/*.json
-            build/desktop/gui-acceptance/*.log
-            build/desktop/rule-management-acceptance/*.png
-            build/desktop/rule-management-acceptance/*.json
-            build/desktop/rule-management-acceptance/*.log
-            build/desktop/rule-management-acceptance/baseline/*.png
-            build/desktop/rule-management-acceptance/baseline/*.json
-            build/desktop/rule-management-acceptance/baseline/*.log
-            build/desktop/rule-drag-acceptance/*.png
-            build/desktop/rule-drag-acceptance/*.json
-            build/desktop/rule-drag-acceptance/*.log
-            build/desktop/rule-drag-acceptance/baseline/*.png
-            build/desktop/rule-drag-acceptance/baseline/*.json
-            build/desktop/rule-drag-acceptance/baseline/*.log
-            build/desktop/linux-installed-gui/session/*.png
-            build/desktop/linux-installed-gui/session/*.json
-            build/desktop/linux-installed-gui/session/*.log
-            build/desktop/linux-installed-gui/rule-management/*.png
-            build/desktop/linux-installed-gui/rule-management/*.json
-            build/desktop/linux-installed-gui/rule-management/*.log
-            build/desktop/linux-installed-gui/rule-management/baseline/*.png
-            build/desktop/linux-installed-gui/rule-management/baseline/*.json
-            build/desktop/linux-installed-gui/rule-management/baseline/*.log
-            build/desktop/linux-installed-gui/rule-drag/*.png
-            build/desktop/linux-installed-gui/rule-drag/*.json
-            build/desktop/linux-installed-gui/rule-drag/*.log
-            build/desktop/linux-installed-gui/rule-drag/baseline/*.png
-            build/desktop/linux-installed-gui/rule-drag/baseline/*.json
-            build/desktop/linux-installed-gui/rule-drag/baseline/*.log
-            build/desktop/tray-acceptance/*.png
-            build/desktop/tray-acceptance/*.json
-            build/desktop/tray-acceptance/*.log
-            build/desktop/linux-installed-tray/session/*.png
-            build/desktop/linux-installed-tray/session/*.json
-            build/desktop/linux-installed-tray/session/*.log
-            build/desktop/connected-gui/*.png
-            build/desktop/connected-gui/*.json
-            build/desktop/connected-gui/*.log
-          if-no-files-found: error
+          name: tauri-${{ runner.os }}
+          path: build/desktop/tauri

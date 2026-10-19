@@ -1,6 +1,5 @@
 pub use crate::update::{release::UpdateInfo, UpdateFailure};
 
-#[flutter_rust_bridge::frb(opaque)]
 pub struct UpdateClient {
     inner: crate::update::Client,
 }
@@ -17,7 +16,6 @@ impl UpdateClient {
     ) -> Result<Option<UpdateInfo>, UpdateFailure> {
         self.inner.check(current_version).await
     }
-    #[flutter_rust_bridge::frb(sync)]
     pub fn close(&self) {
         self.inner.close();
     }

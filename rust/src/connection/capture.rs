@@ -410,13 +410,7 @@ mod tests {
     use std::time::Duration;
     use tokio::sync::Notify;
 
-    #[allow(dead_code)]
-    mod gateway {
-        include!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/tests/support/gateway.rs"
-        ));
-    }
+    use crate::test_gateway as gateway;
     mod datagram {
         include!(concat!(
             env!("CARGO_MANIFEST_DIR"),

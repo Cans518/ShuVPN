@@ -7,13 +7,7 @@ use std::{
 };
 use tokio::{net::TcpStream, time::timeout};
 
-#[allow(dead_code)]
-mod gateway {
-    include!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/tests/support/gateway.rs"
-    ));
-}
+use crate::test_gateway as gateway;
 
 fn proxies() -> ProxyStartup {
     ProxyStartup {

@@ -4,14 +4,13 @@ pub use crate::connection::desktop_services::{
 pub use crate::connection::model::{
     ProxyBinding, ProxyKind, VpnEvent, VpnEventKind, VpnFailure, VpnState,
 };
-use crate::{connection::session::Engine, frb_generated::StreamSink};
+use crate::connection::session::Engine;
 
 pub struct SessionIdentity {
     pub connection_id: String,
     pub sign_key: Vec<u8>,
 }
 
-#[flutter_rust_bridge::frb(sync)]
 pub fn session_identity(device_id: String) -> Result<SessionIdentity, VpnFailure> {
     let identity = crate::connection::identity::new(&device_id)?;
     Ok(SessionIdentity {
@@ -20,7 +19,6 @@ pub fn session_identity(device_id: String) -> Result<SessionIdentity, VpnFailure
     })
 }
 
-#[flutter_rust_bridge::frb(opaque)]
 pub struct VpnSession {
     engine: std::sync::Arc<Engine>,
     run_id: u64,
@@ -28,7 +26,6 @@ pub struct VpnSession {
     startup: Option<DesktopServicesReport>,
 }
 
-#[flutter_rust_bridge::frb(opaque)]
 pub struct VpnConnectAttempt {
     cancellation: tokio_util::sync::CancellationToken,
     owns_cancellation: bool,
@@ -49,7 +46,6 @@ impl Drop for VpnConnectAttempt {
 }
 
 impl VpnConnectAttempt {
-    #[flutter_rust_bridge::frb(ignore)]
     pub(crate) fn for_owner(cancellation: tokio_util::sync::CancellationToken) -> Self {
         Self {
             cancellation,
@@ -106,7 +102,6 @@ impl VpnConnectAttempt {
         .await
     }
 
-    #[flutter_rust_bridge::frb(ignore)]
     async fn connect_account_using_routing(
         &self,
         account: &crate::api::account::AccountSession,
@@ -129,7 +124,6 @@ impl VpnConnectAttempt {
         .await
     }
 
-    #[flutter_rust_bridge::frb(ignore)]
     async fn with_deadline<T>(
         &self,
         timeout_ms: u32,
@@ -169,7 +163,6 @@ impl VpnConnectAttempt {
         }
     }
 
-    #[flutter_rust_bridge::frb(sync)]
     pub fn new() -> Self {
         Self {
             cancellation: tokio_util::sync::CancellationToken::new(),
@@ -177,7 +170,6 @@ impl VpnConnectAttempt {
         }
     }
 
-    #[flutter_rust_bridge::frb(sync)]
     pub fn cancel(&self) {
         self.cancellation.cancel();
     }
@@ -207,7 +199,6 @@ impl VpnConnectAttempt {
         .await
     }
 
-    #[flutter_rust_bridge::frb(ignore)]
     async fn connect_prepared_using_routing(
         &self,
         prepared: &crate::api::newsso::PreparedATrustTunnel,
@@ -232,7 +223,6 @@ impl VpnConnectAttempt {
 }
 
 impl VpnSession {
-    #[flutter_rust_bridge::frb(ignore)]
     pub(crate) fn into_owned(self) -> crate::connection::owner::Session {
         crate::connection::owner::Session {
             engine: self.engine,
@@ -241,7 +231,6 @@ impl VpnSession {
             startup: self.startup,
         }
     }
-    #[flutter_rust_bridge::frb(ignore)]
     pub(crate) fn from_owned(session: crate::connection::owner::Session) -> Self {
         Self {
             engine: session.engine,
@@ -277,7 +266,6 @@ impl VpnSession {
         crate::connection::desktop_tun::stop_service(&self.engine).await
     }
 
-    #[flutter_rust_bridge::frb(sync)]
     pub fn preparation_warnings(&self) -> Vec<String> {
         self.preparation_warnings.clone()
     }
@@ -466,7 +454,6 @@ impl VpnSession {
         .await
     }
 
-    #[flutter_rust_bridge::frb(ignore)]
     async fn connect_using_routing(
         plan_json: String,
         timeout_ms: u32,
@@ -528,29 +515,29 @@ impl VpnSession {
         self.engine.stop().await
     }
 
-    /// The task owns the receiver, so an event stream cannot retain the FFI session.
-    pub fn events(&self, sink: StreamSink<VpnEvent>) {
+    /// The task owns the receiver, so a subscriber cannot retain the session.
+    pub fn events(&self, mut emit: impl FnMut(VpnEvent) -> bool + Send + 'static) {
         let already_closed = self.engine.is_closed();
         let mut receiver = self.engine.events();
         let shared = std::sync::Arc::clone(&self.engine.shared);
         self.engine.runtime.spawn(async move {
-            if sink.add(shared.snapshot(VpnEventKind::State, 0.0, 0.0)).is_err() { return; }
+            if !emit(shared.snapshot(VpnEventKind::State, 0.0, 0.0)) { return; }
             if already_closed { return; }
             loop {
                 tokio::select! {
                     event = receiver.recv() => match event {
                         Ok(event) => {
                             let closed = matches!(event.state, VpnState::Disconnected | VpnState::Failed);
-                            if sink.add(event).is_err() || closed { break; }
+                            if !emit(event) || closed { break; }
                         }
                         Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
-                            if sink.add(shared.snapshot(VpnEventKind::Traffic, 0.0, 0.0)).is_err() { break; }
+                            if !emit(shared.snapshot(VpnEventKind::Traffic, 0.0, 0.0)) { break; }
                         }
                         Err(_) => break,
                     },
                     _ = shared.cancellation.cancelled() => {
                         shared.wait_closed().await;
-                        let _ = sink.add(shared.snapshot(VpnEventKind::State, 0.0, 0.0));
+                        emit(shared.snapshot(VpnEventKind::State, 0.0, 0.0));
                         break;
                     }
                 }
@@ -562,9 +549,26 @@ impl VpnSession {
         self.engine.shared.snapshot(VpnEventKind::State, 0.0, 0.0)
     }
 
-    #[flutter_rust_bridge::frb(sync)]
     pub fn cancel(&self) {
         self.engine.shared.cancellation.cancel();
+    }
+}
+
+pub struct VpnPacketPort {
+    port: crate::connection::packet::Port,
+}
+
+impl VpnPacketPort {
+    pub async fn write_packet(&self, packet: Vec<u8>) -> Result<(), VpnFailure> {
+        self.port.write(packet).await
+    }
+
+    pub async fn read_packet(&self, wait_ms: u32) -> Result<Option<Vec<u8>>, VpnFailure> {
+        self.port.read(wait_ms).await
+    }
+
+    pub async fn close(&self) {
+        self.port.close().await
     }
 }
 
@@ -617,24 +621,5 @@ mod deadline_tests {
             .await;
         assert!(result.is_err_and(|failure| failure.code == "cancelled"));
         assert!(!polled.load(Ordering::Relaxed));
-    }
-}
-
-#[flutter_rust_bridge::frb(opaque)]
-pub struct VpnPacketPort {
-    port: crate::connection::packet::Port,
-}
-
-impl VpnPacketPort {
-    pub async fn write_packet(&self, packet: Vec<u8>) -> Result<(), VpnFailure> {
-        self.port.write(packet).await
-    }
-
-    pub async fn read_packet(&self, wait_ms: u32) -> Result<Option<Vec<u8>>, VpnFailure> {
-        self.port.read(wait_ms).await
-    }
-
-    pub async fn close(&self) {
-        self.port.close().await
     }
 }

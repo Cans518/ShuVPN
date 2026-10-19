@@ -4,15 +4,18 @@ import struct
 import tarfile
 import tempfile
 import unittest
+from unittest.mock import patch
 import zipfile
 from pathlib import Path
 
 from tool.package_desktop import (
-    FLUTTER_ASSETS,
     REQUIRED,
     ROOT,
+    app_version,
     package_bundle,
+    package_release,
     verify_package,
+    verify_release_package,
 )
 
 
@@ -36,21 +39,77 @@ class DesktopBundleFixture:
 
     def bundle(self, platform: str) -> Path:
         bundle = self.directory / platform
-        images = [
-            "data/flutter_assets/" + path.relative_to(ROOT).as_posix()
-            for path in (ROOT / "assets" / "images").rglob("*") if path.is_file()
-        ]
-        for relative in (*REQUIRED[platform], *FLUTTER_ASSETS, *images):
+        for relative in REQUIRED[platform]:
             path = bundle / relative
             path.parent.mkdir(parents=True, exist_ok=True)
             binary_platform = "linux" if relative.endswith(".so") else platform
             if relative in {"install.py", "shuvpn.desktop"}:
-                path.write_bytes((ROOT / "linux" / relative).read_bytes())
+                path.write_bytes((ROOT / "packaging/linux" / relative).read_bytes())
             else:
                 path.write_bytes(fixture_binary(binary_platform))
         return bundle
 
 class DesktopPackageTest(DesktopBundleFixture, unittest.TestCase):
+    def release_bundle(self, platform: str) -> Path:
+        bundle = self.bundle(platform)
+        (bundle / "icon.png").write_bytes(b"icon fixture")
+        (bundle / "build-info.json").write_text(json.dumps({
+            "schema": 1, "product": "ShuVPN", "version": app_version(),
+            "profile": "release", "frontend": "embedded", "platform": platform, "architecture": "x86_64",
+        }), encoding="utf-8")
+        return bundle
+
+    def test_official_release_rejects_dirty_sources_and_extra_development_files(self):
+        source = {"revision": "a" * 40, "dirty": False, "tree_sha256": "b" * 64, "file_count": 10}
+        with patch("tool.package_desktop.clean_checkout", return_value=source["revision"]), \
+                patch("tool.package_desktop.release_version", return_value=app_version()), \
+                patch("tool.package_desktop.source_identity", return_value={**source, "dirty": True}):
+            with self.assertRaisesRegex(ValueError, "clean"):
+                package_release("windows", self.release_bundle("windows"), self.directory / "dirty")
+        with patch("tool.package_desktop.clean_checkout", return_value=source["revision"]), \
+                patch("tool.package_desktop.release_version", return_value=app_version()), \
+                patch("tool.package_desktop.source_identity", return_value=source):
+            bundle = self.release_bundle("windows")
+            (bundle / "debug.log").write_text("development output", encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "Unexpected"):
+                package_release("windows", bundle, self.directory / "extra")
+
+    def test_official_package_preserves_release_identity_and_rejects_a_debug_build(self):
+        source = {"revision": "a" * 40, "dirty": False, "tree_sha256": "b" * 64, "file_count": 10}
+        with patch("tool.package_desktop.clean_checkout", return_value=source["revision"]), \
+                patch("tool.package_desktop.release_version", return_value=app_version()), \
+                patch("tool.package_desktop.source_identity", return_value=source):
+            bundle = self.release_bundle("windows")
+            info = json.loads((bundle / "build-info.json").read_text())
+            with patch("tool.package_desktop.read_build_info", return_value=info) as query:
+                archive = package_release("windows", bundle, self.directory / "official")
+                query.assert_called_once_with(bundle / "shuvpn.exe")
+            verify_release_package(archive)
+            with zipfile.ZipFile(archive) as reader:
+                manifest = json.loads(next(reader.read(name) for name in reader.namelist() if name.endswith("/package.json")))
+            self.assertEqual(manifest["channel"], "stable")
+            self.assertFalse(manifest["source"]["dirty"])
+            info = json.loads((bundle / "build-info.json").read_text())
+            (bundle / "build-info.json").write_text(json.dumps({**info, "profile": "debug"}))
+            with self.assertRaisesRegex(ValueError, "release build"):
+                package_release("windows", bundle, self.directory / "debug")
+
+    def test_a_staged_identity_cannot_disguise_another_executable_or_revision(self):
+        source = {"revision": "a" * 40, "dirty": False, "tree_sha256": "b" * 64, "file_count": 10}
+        with patch("tool.package_desktop.clean_checkout", return_value=source["revision"]), \
+                patch("tool.package_desktop.release_version", return_value=app_version()), \
+                patch("tool.package_desktop.source_identity", return_value=source):
+            bundle = self.release_bundle("windows")
+            with self.assertRaisesRegex(ValueError, "Cannot read build identity"):
+                package_release("windows", bundle, self.directory / "fake-binary")
+            info = json.loads((bundle / "build-info.json").read_text())
+            with patch("tool.package_desktop.read_build_info", return_value={**info, "profile": "debug"}):
+                with self.assertRaisesRegex(ValueError, "release build"):
+                    package_release("windows", bundle, self.directory / "swapped")
+            with patch("tool.package_desktop.source_identity", return_value={**source, "revision": "c" * 40}):
+                with self.assertRaisesRegex(ValueError, "actual clean checkout"):
+                    package_release("windows", bundle, self.directory / "spoofed")
+
     def test_inventory_cannot_name_windows_drives_streams_or_ambiguous_paths(self) -> None:
         archive = package_bundle("windows", self.bundle("windows"), self.directory / "output")
         with zipfile.ZipFile(archive) as reader:
@@ -96,7 +155,7 @@ class DesktopPackageTest(DesktopBundleFixture, unittest.TestCase):
             entries = {name: reader.read(name) for name in reader.namelist()}
         extra = next(name for name in entries if name.endswith("/extra_plugin.dll"))
         self.assertIn(extra, entries)
-        changed = next(name for name in entries if name.endswith("/shuvpn_core.dll"))
+        changed = next(name for name in entries if name.endswith("/shuvpn.exe"))
         entries[changed] += b"changed"
         corrupted = self.directory / "corrupted.zip"
         with zipfile.ZipFile(corrupted, "w") as writer:
@@ -113,24 +172,23 @@ class DesktopPackageTest(DesktopBundleFixture, unittest.TestCase):
             package_bundle("windows", bundle, output)
         self.assertFalse(output.exists())
 
-    def test_windows_bundle_without_adapted_tray_license_is_rejected(self) -> None:
+    def test_windows_bundle_without_driver_license_is_rejected(self) -> None:
         bundle = self.bundle("windows")
-        (bundle / "data/licenses/system_tray/LICENSE").unlink()
+        (bundle / "data/licenses/wintun/LICENSE.txt").unlink()
         output = self.directory / "output"
-        with self.assertRaisesRegex(ValueError, "data/licenses/system_tray/LICENSE"):
+        with self.assertRaisesRegex(ValueError, "data/licenses/wintun/LICENSE.txt"):
             package_bundle("windows", bundle, output)
         self.assertFalse(output.exists())
 
-    def test_desktop_bundle_requires_both_wenkai_font_and_its_license(self) -> None:
+    def test_desktop_bundle_requires_open_source_notices(self) -> None:
         for platform in ("windows", "linux"):
-            for name in ("LXGWWenKaiScreen.ttf", "OFL.txt"):
-                with self.subTest(platform=platform, name=name):
-                    bundle = self.bundle(platform)
-                    (bundle / "data/flutter_assets/assets/fonts" / name).unlink()
-                    output = self.directory / "output"
-                    with self.assertRaisesRegex(ValueError, name.replace(".", r"\.")):
-                        package_bundle(platform, bundle, output)
-                    self.assertFalse(output.exists())
+            with self.subTest(platform=platform):
+                bundle = self.bundle(platform)
+                (bundle / "THIRD_PARTY_NOTICES.md").unlink()
+                output = self.directory / "output"
+                with self.assertRaisesRegex(ValueError, "THIRD_PARTY_NOTICES"):
+                    package_bundle(platform, bundle, output)
+                self.assertFalse(output.exists())
 
     def test_linux_archive_preserves_executable_and_records_source(self) -> None:
         archive = package_bundle("linux", self.bundle("linux"), self.directory / "output")
@@ -160,22 +218,18 @@ class DesktopPackageTest(DesktopBundleFixture, unittest.TestCase):
 
     def test_wrong_architecture_is_rejected_and_does_not_publish_archive(self) -> None:
         bundle = self.bundle("linux")
-        (bundle / "lib/libshuvpn_core.so").write_bytes(fixture_binary("windows"))
+        (bundle / "shuvpn").write_bytes(fixture_binary("windows"))
         output = self.directory / "output"
         with self.assertRaisesRegex(ValueError, "x64 binary"):
             package_bundle("linux", bundle, output)
         self.assertEqual(list(output.glob("*.tar.gz")), [])
 
-    def test_missing_flutter_manifest_is_rejected(self) -> None:
-        bundle = self.bundle("windows")
-        (bundle / "data/flutter_assets/AssetManifest.bin").unlink()
-        with self.assertRaisesRegex(ValueError, "AssetManifest.bin"):
-            package_bundle("windows", bundle, self.directory / "output")
-
     def test_wrong_plugin_architecture_is_rejected(self) -> None:
         bundle = self.bundle("linux")
-        (bundle / "lib/libsystem_tray_plugin.so").write_bytes(fixture_binary("windows"))
-        with self.assertRaisesRegex(ValueError, "libsystem_tray_plugin.so"):
+        extra = bundle / "lib/optional.so"
+        extra.parent.mkdir()
+        extra.write_bytes(fixture_binary("windows"))
+        with self.assertRaisesRegex(ValueError, "optional.so"):
             package_bundle("linux", bundle, self.directory / "output")
 
     def test_linux_bundle_without_helper_is_rejected_before_output(self) -> None:

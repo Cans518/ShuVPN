@@ -1,4 +1,4 @@
-//! Opt-in kernel/ring verification; never exposed through FRB.
+//! Opt-in kernel/ring verification for the standalone platform probe.
 use super::{
     helper::Client,
     ip::{self, RouteIo},

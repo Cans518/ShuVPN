@@ -18,6 +18,8 @@ pub use platform::windows_tun::probe::{
     verify_helper_disconnect as verify_windows_tun_helper_disconnect,
 };
 pub mod routing;
-// FRB-generated serializers use checked-by-codec unwraps.
-#[allow(clippy::unwrap_used, clippy::expect_used)]
-mod frb_generated;
+
+#[cfg(test)]
+#[allow(dead_code)]
+#[path = "../tests/support/gateway.rs"]
+mod test_gateway;

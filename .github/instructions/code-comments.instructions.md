@@ -1,12 +1,12 @@
 ---
-description: "Use when writing, editing, or reviewing comments in source code: which comments to write, where they belong, and the required tone and format for doc comments (`///`), implementation comments (`//`), and TODOs. Minimal, professional comments based on Effective Dart, the Google style guides, and .NET conventions — no narration, no filler, no restating code, no commented-out code."
+description: "Use when writing, editing, or reviewing comments in source code: which comments to write, where they belong, and the required tone and format for Rust documentation, implementation comments and TODOs. Minimal professional comments — no narration, no filler, no restating code, no commented-out code."
 applyTo: "**"
 ---
 
 # 代码注释规范
 
 先假定不写。删掉它会让后来的人做错事，才写。
-依据 Effective Dart: Documentation、Google C++ Style Guide 的 Comments、.NET 编码约定。
+适用于 Rust、TypeScript、Python 和平台代码；文档使用各语言的原生格式。
 
 ## 该写的四类
 
@@ -39,17 +39,20 @@ applyTo: "**"
 
 ## 文档注释
 
-```dart
-/// 删除 [path] 指向的文件。
+```rust
+/// 删除 `path` 指向的文件。
 ///
-/// 文件不存在时抛 [IOError]，存在但无权限时抛 [PermissionError]。
-void delete(String path) { ... }
+/// # Errors
+/// 文件不存在或没有写入权限时返回 I/O 错误。
+fn remove_file(path: &std::path::Path) -> std::io::Result<()> {
+    std::fs::remove_file(path)
+}
 ```
 
-- 首句是一句话摘要，单独成段。`dart doc` 拿它当列表短摘要。
+- 首句是一句话摘要，单独成段，供文档工具展示成员摘要。
 - 有副作用的用第三人称动词，是属性的用名词短语，布尔用 `Whether`。
 - 参数、返回值、异常用散文写，不写 `@param`。
-- 用 `[方括号]` 引用同作用域标识符。
+- Rust 使用 ``[`标识符`]``，TypeScript 使用 `{@link 标识符}` 引用同作用域成员。
 - 不重复上下文：类名、签名、父类都在眼前。
 
 ## 句子与格式
@@ -69,19 +72,19 @@ void delete(String path) { ... }
 
 ## 对照
 
-```dart
+```rust
 // 错：复述加口水。
 // 这里我们把设置里的等级装到日志上，因为如果不提前装的话后面可能就会有问题
-ShuLog.instance.configure(level: level);
+configure_logging(level);
 
 // 对：只写代价。
 /// 必须早于任何一条日志写入。缓冲区按写入时的阈值丢弃记录，装晚了会把
 /// 启动阶段的日志永久丢掉。
-ShuLog.instance.configure(level: level);
+configure_logging(level);
 
 // 错：参数含义靠注释解释。
 calculate(values, 7, false);
 
 // 对：让调用点自明。
-calculate(values, precision: 7, useCache: false);
+calculate(values, CalculationOptions { precision: 7, cache: CachePolicy::Disabled });
 ```

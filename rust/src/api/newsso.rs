@@ -6,18 +6,15 @@ pub use crate::auth::newsso::model::{
 use crate::auth::newsso::Client;
 
 /// Owns SSO cookies and challenge secrets; only presentation state crosses FFI.
-#[flutter_rust_bridge::frb(opaque)]
 pub struct NewssoSession {
     inner: Client,
 }
 
-#[flutter_rust_bridge::frb(opaque)]
 pub struct PreparedATrustTunnel {
     pub(crate) inner: crate::auth::newsso::connection::Prepared,
 }
 
 impl PreparedATrustTunnel {
-    #[flutter_rust_bridge::frb(sync)]
     pub fn warnings(&self) -> Vec<String> {
         self.inner.warnings()
     }
@@ -100,24 +97,19 @@ impl NewssoSession {
                 .await?,
         })
     }
-    #[flutter_rust_bridge::frb(sync)]
     pub fn cancel_qr(&self) -> Result<(), AuthFailure> {
         self.inner.clear()
     }
-    #[flutter_rust_bridge::frb(sync)]
     pub fn clear(&self) -> Result<(), AuthFailure> {
         self.inner.clear()
     }
     /// Releases the directory lease while keeping the committed session.
-    #[flutter_rust_bridge::frb(sync)]
     pub fn close(&self) -> Result<(), AuthFailure> {
         self.inner.close()
     }
-    #[flutter_rust_bridge::frb(sync)]
     pub fn snapshot(&self) -> Result<SsoSnapshot, AuthFailure> {
         self.inner.snapshot()
     }
-    #[flutter_rust_bridge::frb(sync)]
     pub fn import_legacy(&self, document: String) -> Result<usize, AuthFailure> {
         self.inner.import_legacy(&document)
     }

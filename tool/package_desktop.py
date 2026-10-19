@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Package and verify complete Flutter desktop release bundles."""
+"""Package and verify the Tauri executable and native helper."""
 
 import argparse
 import hashlib
@@ -14,72 +14,47 @@ import tempfile
 import zipfile
 from pathlib import Path, PurePosixPath
 
+if __package__:
+    from .release import clean_checkout, release_version, validate_build, validate_source, read_build_info
+else:
+    from release import clean_checkout, release_version, validate_build, validate_source, read_build_info
+
 ROOT = Path(__file__).resolve().parents[1]
 MANIFEST = "package.json"
 REQUIRED = {
     "windows": (
         "shuvpn.exe",
-        "shuvpn_core.dll",
         "shuvpn_tun_helper.exe",
-        "flutter_windows.dll",
         "wintun.dll",
-        "msvcp140.dll",
-        "vcruntime140.dll",
-        "vcruntime140_1.dll",
-        "window_manager_plugin.dll",
-        "system_tray_plugin.dll",
-        "url_launcher_windows_plugin.dll",
-        "data/app.so",
-        "data/icudtl.dat",
         "data/licenses/wintun/LICENSE.txt",
-        "data/licenses/system_tray/LICENSE",
+        "THIRD_PARTY_NOTICES.md",
     ),
     "linux": (
         "shuvpn",
         "shuvpn_tun_helper",
-        "lib/libshuvpn_core.so",
-        "lib/libflutter_linux_gtk.so",
-        "lib/libwindow_manager_plugin.so",
-        "lib/libsystem_tray_plugin.so",
-        "lib/liburl_launcher_linux_plugin.so",
-        "lib/libapp.so",
-        "data/icudtl.dat",
+        "THIRD_PARTY_NOTICES.md",
         "install.py",
         "shuvpn.desktop",
+        "icon.png",
     ),
 }
 LINUX_EXECUTABLES = {"shuvpn", "shuvpn_tun_helper"}
-FLUTTER_ASSETS = (
-    "data/flutter_assets/AssetManifest.bin",
-    "data/flutter_assets/FontManifest.json",
-    "data/flutter_assets/NativeAssetsManifest.json",
-    "data/flutter_assets/NOTICES.Z",
-    "data/flutter_assets/fonts/MaterialIcons-Regular.otf",
-    "data/flutter_assets/assets/fonts/LXGWWenKaiScreen.ttf",
-    "data/flutter_assets/assets/fonts/OFL.txt",
-)
-
 
 def digest(content: bytes) -> str:
     return hashlib.sha256(content).hexdigest()
 
 
 def app_version() -> str:
-    text = (ROOT / "pubspec.yaml").read_text(encoding="utf-8")
-    match = re.search(r"^version:\s*(\d+\.\d+\.\d+\+\d+)\s*$", text, re.MULTILINE)
-    if match is None:
-        raise ValueError("pubspec.yaml must define a version and build number")
-    return match.group(1)
+    version = json.loads((ROOT / "desktop/package.json").read_text(encoding="utf-8"))["version"]
+    if re.fullmatch(r"\d+\.\d+\.\d+", version) is None:
+        raise ValueError("desktop/package.json must define a numeric version")
+    return version
 
 
 def validate_files(names: set[str], platform: str) -> None:
     for name in names:
         validate_relative_path(name)
-    missing = set(REQUIRED[platform]) | set(FLUTTER_ASSETS)
-    missing.update(
-        "data/flutter_assets/" + path.relative_to(ROOT).as_posix()
-        for path in (ROOT / "assets" / "images").rglob("*") if path.is_file()
-    )
+    missing = set(REQUIRED[platform])
     missing -= names
     if missing:
         raise ValueError(f"Incomplete {platform} bundle: {', '.join(sorted(missing))}")
@@ -147,16 +122,14 @@ def source_identity() -> dict[str, object]:
         raise ValueError("Source revision must be a full Git commit hash")
     fingerprint = hashlib.sha256()
     paths = []
-    for directory in ("lib", "rust", "rust_builder", "windows", "linux", "assets", "tool", "test", ".github"):
+    for directory in ("desktop", "rust", "third_party", "packaging", "tool", "test", ".github"):
         for current, directories, filenames in os.walk(ROOT / directory):
             directories[:] = sorted(
                 name for name in directories
-                if name not in ("target", "build", "ephemeral", ".plugin_symlinks", "__pycache__")
+                if name not in ("target", "build", "dist", "node_modules", "gen", "__pycache__")
             )
             paths.extend(Path(current) / name for name in filenames)
-    paths.extend(ROOT / name for name in (
-        "pubspec.yaml", "pubspec.lock", "flutter_rust_bridge.yaml", "analysis_options.yaml"
-    ))
+    paths.extend(ROOT / name for name in ("LICENSE", "README.md", "rust-toolchain.toml"))
     for path in sorted(paths, key=lambda path: path.relative_to(ROOT).as_posix()):
         fingerprint.update(path.relative_to(ROOT).as_posix().encode("utf-8") + b"\0")
         fingerprint.update(bytes.fromhex(digest(path.read_bytes())))
@@ -177,6 +150,34 @@ def linux_archive_member(member: tarfile.TarInfo) -> tarfile.TarInfo:
 
 
 def package_bundle(platform: str, bundle: Path, output: Path) -> Path:
+    return _package_bundle(platform, bundle, output, None)
+
+
+def release_files(platform: str) -> set[str]:
+    return set(REQUIRED[platform]) | {"icon.png", "build-info.json"}
+
+
+def package_release(platform: str, bundle: Path, output: Path) -> Path:
+    revision = clean_checkout(ROOT)
+    version = release_version(ROOT)
+    source = source_identity()
+    validate_source(source)
+    if source["revision"] != revision:
+        raise ValueError("Official source identity must match the actual clean checkout")
+    names = set(bundle_files(bundle.resolve(strict=True)))
+    if names != release_files(platform):
+        raise ValueError(f"Unexpected or missing official release files: {sorted(names ^ release_files(platform))}")
+    info = json.loads((bundle / "build-info.json").read_text(encoding="utf-8"))
+    validate_build(info, platform, version)
+    executable = bundle / ("shuvpn.exe" if platform == "windows" else "shuvpn")
+    actual_info = read_build_info(executable)
+    validate_build(actual_info, platform, version)
+    if actual_info != info:
+        raise ValueError("Staged build identity does not match the selected executable")
+    return _package_bundle(platform, bundle, output, info)
+
+
+def _package_bundle(platform: str, bundle: Path, output: Path, release_info: dict | None) -> Path:
     bundle = bundle.resolve(strict=True)
     output = output.resolve()
     if output.is_relative_to(bundle):
@@ -203,11 +204,14 @@ def package_bundle(platform: str, bundle: Path, output: Path) -> Path:
         (staging / "README.txt").write_text(
             f"ShuVPN {version} — {platform} x64\n\n"
             f"Extract this entire directory, then run {executable}.\n"
-            "Keep data/ and all bundled libraries beside the executable.\n"
+            "Keep the helper, driver and notices beside the executable.\n"
             "Account and settings data are stored in the user application directory.\n"
+            "Closing the window keeps ShuVPN running in the tray. Use the tray or settings to exit.\n"
+            "Launching ShuVPN again restores its existing window.\n"
+            "Optional startup at login, color presets and custom theme import/export are in settings.\n"
             "Disconnect and exit the application before replacing this directory.\n"
             + (
-                "\nLinux requires a graphical desktop with GTK 3, libstdc++ and "
+                "\nLinux requires a graphical desktop with WebKitGTK 4.1, GTK 3, libstdc++ and "
                 "Ayatana AppIndicator. This bundle targets Ubuntu 22.04 or a "
                 "compatible system. The separate shuvpn_tun_helper is included "
                 "without file capabilities. To install, exit ShuVPN and run:\n"
@@ -223,7 +227,8 @@ def package_bundle(platform: str, bundle: Path, output: Path) -> Path:
                 "to the GTK executable. System proxy support depends on the desktop environment.\n"
                 if platform == "linux"
                 else "\nRun shuvpn.exe from the extracted directory. "
-                "The bundled helper and Wintun driver must remain beside it.\n"
+                "The bundled helper and Wintun driver must remain beside it. "
+                "Microsoft Edge WebView2 Runtime is required.\n"
             ),
             encoding="utf-8",
         )
@@ -244,6 +249,12 @@ def package_bundle(platform: str, bundle: Path, output: Path) -> Path:
             "source": source_identity(),
             "files": inventory,
         }
+        if release_info is not None:
+            validate_source(manifest["source"])
+            if manifest["source"]["revision"] != clean_checkout(ROOT):
+                raise ValueError("Release source changed during packaging")
+            manifest["channel"] = "stable"
+            manifest["build"] = release_info
         (staging / MANIFEST).write_text(
             json.dumps(manifest, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
         )
@@ -257,6 +268,8 @@ def package_bundle(platform: str, bundle: Path, output: Path) -> Path:
             with tarfile.open(archive, "w:gz") as writer:
                 writer.add(staging, arcname=name, filter=linux_archive_member)
         verify_package(archive)
+        if release_info is not None:
+            verify_release_package(archive)
         archive.replace(destination)
     checksum = destination.with_name(destination.name + ".sha256")
     checksum.write_text(
@@ -308,7 +321,7 @@ def verify_package(archive: Path) -> None:
         manifest.get("schema") != 1 or platform not in REQUIRED
         or manifest.get("product") != "ShuVPN"
         or not isinstance(version, str)
-        or re.fullmatch(r"\d+\.\d+\.\d+\+\d+", version) is None
+        or re.fullmatch(r"\d+\.\d+\.\d+", version) is None
     ):
         raise ValueError("Unsupported desktop package manifest")
     expected_prefix = f"ShuVPN-{manifest['version']}-{platform}-x64/"
@@ -330,20 +343,45 @@ def verify_package(archive: Path) -> None:
             validate_architecture(content, binary_platform, name)
 
 
+def verify_release_package(archive: Path) -> dict:
+    verify_package(archive)
+    contents = archive_contents(archive)
+    manifest = json.loads(next(value for name, value in contents.items() if name.endswith("/" + MANIFEST)))
+    if manifest.get("channel") != "stable":
+        raise ValueError("Expected an official stable release archive")
+    validate_source(manifest.get("source", {}))
+    info = manifest.get("build", {})
+    validate_build(info, manifest["platform"], manifest["version"])
+    expected_files = release_files(manifest["platform"]) | {"LICENSE", "README.txt"}
+    if set(manifest["files"]) != expected_files:
+        raise ValueError("Unexpected files in official release archive")
+    packaged_info = next(value for name, value in contents.items() if name.endswith("/build-info.json"))
+    if json.loads(packaged_info) != info:
+        raise ValueError("Packaged build identity does not match release manifest")
+    return manifest
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
-    build = commands.add_parser("build")
-    build.add_argument("--platform", choices=REQUIRED, required=True)
-    build.add_argument("--bundle", type=Path, required=True)
-    build.add_argument("--output", type=Path, default=ROOT / "build" / "desktop")
+    for name in ("build", "release"):
+        build = commands.add_parser(name)
+        build.add_argument("--platform", choices=REQUIRED, required=True)
+        build.add_argument("--bundle", type=Path, required=True)
+        build.add_argument("--output", type=Path, default=ROOT / "build" / "desktop")
     verify = commands.add_parser("verify")
     verify.add_argument("archive", type=Path)
+    verify.add_argument("--release", action="store_true")
     args = parser.parse_args()
     if args.command == "build":
         print(package_bundle(args.platform, args.bundle, args.output))
+    elif args.command == "release":
+        print(package_release(args.platform, args.bundle, args.output))
     else:
-        verify_package(args.archive)
+        if args.release:
+            verify_release_package(args.archive)
+        else:
+            verify_package(args.archive)
         print(f"DESKTOP_PACKAGE_INTEGRITY_PASSED {args.archive}")
 
 

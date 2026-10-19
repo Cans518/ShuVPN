@@ -22,7 +22,6 @@ pub struct L3Frame {
 }
 
 /// Rejects further input after a framing error until explicitly reset.
-#[flutter_rust_bridge::frb(opaque)]
 pub struct L3FrameDecoder {
     decoder: FrameDecoder,
     pending: usize,
@@ -36,7 +35,6 @@ impl Default for L3FrameDecoder {
 }
 
 impl L3FrameDecoder {
-    #[flutter_rust_bridge::frb(sync)]
     pub fn new() -> Self {
         Self {
             decoder: FrameDecoder::new(),
@@ -94,7 +92,6 @@ pub struct L3Handshake {
 }
 
 /// Consumes the VIP trailer with the auth response and preserves following frames.
-#[flutter_rust_bridge::frb(opaque)]
 pub struct L3HandshakeDecoder {
     parser: HandshakeParser,
     received: usize,
@@ -108,7 +105,6 @@ impl Default for L3HandshakeDecoder {
 }
 
 impl L3HandshakeDecoder {
-    #[flutter_rust_bridge::frb(sync)]
     pub fn new() -> Self {
         Self {
             parser: HandshakeParser::new(),

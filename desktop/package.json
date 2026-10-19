@@ -1,0 +1,25 @@
+{
+  "name": "shuvpn-desktop",
+  "private": true,
+  "version": "0.6.0",
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "dev": "vite --host 127.0.0.1 --port 1420 --strictPort",
+    "build": "tsc --noEmit && vite build",
+    "tauri": "tauri",
+    "check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@picocss/pico": "2.1.1",
+    "@tauri-apps/api": "2.12.4",
+    "lucide": "1.59.0"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "2.12.3",
+    "typescript": "7.0.2",
+    "vite": "8.3.4"
+  }
+}

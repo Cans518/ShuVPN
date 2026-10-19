@@ -844,13 +844,7 @@ async fn dial_tunnel_pinned(
 mod tests {
     use super::*;
 
-    #[allow(dead_code)]
-    mod gateway {
-        include!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/tests/support/gateway.rs"
-        ));
-    }
+    use crate::test_gateway as gateway;
 
     #[tokio::test]
     async fn captured_dns_tls_cannot_fall_back_to_a_direct_outbound() -> anyhow::Result<()> {

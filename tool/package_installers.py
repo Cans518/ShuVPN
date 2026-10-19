@@ -12,13 +12,25 @@ import tempfile
 from pathlib import Path, PurePosixPath
 
 if __package__:
-    from .package_desktop import ROOT, archive_contents, source_identity, verify_package
+    from .package_desktop import ROOT, archive_contents, source_identity, verify_package, verify_release_package
+    from .release import clean_checkout, release_version
 else:
-    from package_desktop import ROOT, archive_contents, source_identity, verify_package
+    from package_desktop import ROOT, archive_contents, source_identity, verify_package, verify_release_package
+    from release import clean_checkout, release_version
 
 
 def sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def validate_installer_release(archive: Path) -> None:
+    revision = clean_checkout(ROOT)
+    official = verify_release_package(archive)
+    source = source_identity()
+    if source["revision"] != revision:
+        raise ValueError("Installer source identity must match the actual clean checkout")
+    if official["version"] != release_version(ROOT) or official["source"] != source:
+        raise ValueError("Official installer and payload must use the same clean source checkout")
 
 
 def unpack(archive: Path, target: Path) -> dict:
@@ -29,8 +41,8 @@ def unpack(archive: Path, target: Path) -> dict:
         raise ValueError("Expected one desktop package manifest")
     prefix = manifests[0].removesuffix("package.json")
     manifest = json.loads(files[manifests[0]])
-    if not re.fullmatch(r"\d+\.\d+\.\d+\+\d+", manifest["version"]):
-        raise ValueError("Expected a numeric desktop version and build number")
+    if not re.fullmatch(r"\d+\.\d+\.\d+", manifest["version"]):
+        raise ValueError("Expected a numeric desktop version")
     for name, content in files.items():
         if not name.startswith(prefix):
             raise ValueError("Archive has multiple roots")
@@ -63,7 +75,7 @@ def build_windows(bundle: Path, manifest: dict, output: Path, iscc: Path) -> Pat
     subprocess.run([
         str(iscc.resolve(strict=True)), "--quiet-progress",
         f"--define=BundleDir={bundle}", f"--define=AppVersion={manifest['version']}",
-        f"--define=OutputDir={output}", str(ROOT / "windows/installer/shuvpn.iss"),
+        f"--define=OutputDir={output}", str(ROOT / "packaging/windows/shuvpn.iss"),
     ], check=True)
     if not destination.is_file():
         raise RuntimeError("Inno Setup did not produce the expected installer")
@@ -95,7 +107,7 @@ def build_deb(bundle: Path, manifest: dict, output: Path, staging: Path) -> Path
         "Sign out and sign in after authorization. System proxy needs no TUN authorization.\n"
         "Remove: sudo apt remove shuvpn\n"
         "Account/settings data and authorization group membership are retained.\n"
-        "Close ShuVPN before installing, upgrading or removing it.\n"
+        "Exit ShuVPN from its tray menu before installing, upgrading or removing it.\n"
         "Do not overwrite this installation with the portable install.py script.\n"
     )
     write_file(application / "README.txt", readme)
@@ -124,13 +136,13 @@ def build_deb(bundle: Path, manifest: dict, output: Path, staging: Path) -> Path
         "Maintainer: ShuVPN contributors <798061533@qq.com>\n"
         "Section: net\nPriority: optional\n"
         "Depends: libc6 (>= 2.35), libgcc-s1, libstdc++6, libgtk-3-0, "
-        "libayatana-appindicator3-1, libcap2-bin, adduser, passwd, python3\n"
+        "libwebkit2gtk-4.1-0, libayatana-appindicator3-1, libcap2-bin, adduser, passwd, python3\n"
         f"Installed-Size: {sum(p.stat().st_size for p in staging.rglob('*') if p.is_file()) // 1024 + 1}\n"
         "Description: Shanghai University desktop VPN and proxy\n"
-        " Flutter desktop interface with a native Rust networking core.\n"
+        " Tauri desktop interface with a native Rust networking core.\n"
         " The GUI runs without privilege; TUN access requires explicit group authorization.\n"
     ))
-    lifecycle = (ROOT / "linux/packaging/lifecycle.sh").read_text(encoding="utf-8")
+    lifecycle = (ROOT / "packaging/linux/lifecycle.sh").read_text(encoding="utf-8")
     for operation in ("preinst", "postinst", "prerm", "postrm"):
         write_file(control / operation, f"#!/bin/sh\nset -eu\noperation={operation}\n{lifecycle}", 0o755)
     checksums = []
@@ -150,8 +162,11 @@ def main() -> None:
     parser.add_argument("archive", type=Path)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--iscc", type=Path)
+    parser.add_argument("--release", action="store_true")
     args = parser.parse_args()
     archive = args.archive.resolve(strict=True)
+    if args.release:
+        validate_installer_release(archive)
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=True)
     # A WSL output directory may be on drvfs, which cannot preserve DEB modes.

@@ -889,13 +889,7 @@ fn handle_control_frames(shared: &Shared, frames: Vec<l3::Frame>, misses: &mut u
 mod tests {
     use super::*;
 
-    #[allow(dead_code)]
-    mod gateway {
-        include!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/tests/support/gateway.rs"
-        ));
-    }
+    use crate::test_gateway as gateway;
 
     fn with_driver(engine: &Engine, task: JoinHandle<()>) -> Engine {
         Engine {

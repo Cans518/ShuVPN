@@ -2,12 +2,10 @@ pub use crate::settings::model::{Defaults, Edit, SettingKey, SettingsFailure, Se
 use crate::settings::Session;
 use std::sync::Arc;
 
-#[flutter_rust_bridge::frb(sync)]
 pub fn validate_setting(key: SettingKey, value_json: String) -> Result<String, SettingsFailure> {
     crate::settings::validate_value(key, &value_json)
 }
 
-#[flutter_rust_bridge::frb(opaque)]
 pub struct SettingsSession {
     inner: Arc<Session>,
 }
@@ -22,7 +20,6 @@ impl SettingsSession {
             .map_err(|_| crate::settings::model::failure("state", "设置服务启动失败"))?
             .map(|inner| Self { inner })
     }
-    #[flutter_rust_bridge::frb(sync)]
     pub fn snapshot(&self) -> Result<SettingsSnapshot, SettingsFailure> {
         self.inner.snapshot()
     }
@@ -38,7 +35,6 @@ impl SettingsSession {
             .await
             .map_err(|_| crate::settings::model::failure("state", "设置恢复任务失败"))?
     }
-    #[flutter_rust_bridge::frb(sync)]
     pub fn close(&self) -> Result<(), SettingsFailure> {
         self.inner.close()
     }

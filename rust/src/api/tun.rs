@@ -4,7 +4,6 @@ pub use crate::platform::model::PlatformFailure;
 #[cfg(target_os = "windows")]
 use crate::platform::windows_tun::Device;
 
-#[flutter_rust_bridge::frb(opaque)]
 pub struct TunInterface {
     #[cfg(any(target_os = "linux", target_os = "windows"))]
     device: std::sync::Arc<Device>,

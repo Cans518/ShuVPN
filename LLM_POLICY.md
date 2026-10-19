@@ -1,4 +1,4 @@
-# ShuYo LLM 使用政策
+# ShuVPN LLM 使用政策
 
 本文说明在 ShuVPN 开源项目中使用大语言模型（LLM）辅助开发时的基本约定。
 
@@ -13,7 +13,7 @@ LLM 是辅助工具，不是代码或内容的最终责任人。提交 Issue、P
 在确认不包含敏感信息的前提下，LLM 可以用于：
 
 - 讨论实现思路、拆分任务和分析错误信息；
-- 编写或改进 Dart、Flutter、Rust 及 Windows/Linux 平台代码；
+- 编写或改进 TypeScript、CSS、Rust 及 Windows/Linux 平台代码；
 - 编写测试、测试数据和文档；
 - 代码重构、注释和格式整理；
 
@@ -31,8 +31,9 @@ LLM 是辅助工具，不是代码或内容的最终责任人。提交 Issue、P
 Pull Request 仍需满足项目正常的验证要求。一般情况下，提交前应运行：
 
 ```shell
-flutter analyze
-flutter test
+npm run build --prefix desktop
+cargo test --manifest-path rust/Cargo.toml --locked --all-features
+cargo test --manifest-path desktop/src-tauri/Cargo.toml --target-dir rust/target --locked
 ```
 
-涉及平台侧代码时，**必须**在受影响的平台上进行模拟器或真机验证，并在 Pull Request 中说明验证结果。
+涉及平台侧代码时，**必须**在受影响的桌面平台实际运行验证，并在 Pull Request 中说明验证结果。

@@ -799,13 +799,7 @@ mod tests {
         time::{timeout, Duration},
     };
 
-    #[allow(dead_code)]
-    mod gateway {
-        include!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/tests/support/gateway.rs"
-        ));
-    }
+    use crate::test_gateway as gateway;
 
     #[tokio::test]
     async fn expected_parent_close_does_not_mask_unexpected_io_or_owner_cleanup_errors(

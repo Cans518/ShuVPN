@@ -1,16 +1,14 @@
-# Flutter and Dart caches; generated bridge and plugin sources stay tracked.
-.dart_tool/
-.pub/
-.pub-cache/
-.flutter-plugins
-.flutter-plugins-dependencies
-.packages
+# Local build and verification output.
 build/
 coverage/
-.widget_preview/
 
 # Rust build artifacts; Cargo.lock stays tracked.
 /rust/target/
+/third_party/sangfor/target/
+/desktop/src-tauri/target/
+/desktop/node_modules/
+/desktop/dist/
+/desktop/src-tauri/gen/schemas/
 
 # CMake and Ninja build state.
 CMakeFiles/
@@ -56,10 +54,3 @@ htmlcov/
 .DS_Store
 Thumbs.db
 Desktop.ini
-
-# Local-only project scratch directories.
-/.demo
-/.plan
-
-# Local-only redirect of flutter_sangfor to the sibling fork checkout.
-pubspec_overrides.yaml

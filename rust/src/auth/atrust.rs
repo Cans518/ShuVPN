@@ -224,6 +224,16 @@ impl ATrustClient {
         session.gateway_cookies = state.gateway_cookies.values().cloned().collect();
         session.sso_cookies = state.sso_cookies.values().cloned().collect();
         session.sid = self.sid(&state)?;
+        let process_path = std::env::current_exe()
+            .map_err(|error| {
+                AuthFailure::new(
+                    "clientIdentity",
+                    &format!("无法读取客户端可执行路径：{error}"),
+                )
+            })?
+            .into_os_string()
+            .into_string()
+            .map_err(|_| AuthFailure::new("clientIdentity", "客户端可执行路径无法编码"))?;
         let plan = sangfor_core::plan::SessionPlan {
             schema_version: 1,
             sid: session.sid.clone(),
@@ -232,8 +242,8 @@ impl ATrustClient {
             username: session.username.clone(),
             sign_key_base64: STANDARD.encode(options.sign_key),
             lang: "en-US".to_owned(),
-            process_name: "flutter_sangfor".to_owned(),
-            process_path: "/usr/bin/flutter_sangfor".to_owned(),
+            process_name: "shuvpn".to_owned(),
+            process_path,
             process_platform: options.process_platform,
             nodes: resource.nodes,
             major_node_group: resource.major,

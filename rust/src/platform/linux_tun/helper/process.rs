@@ -33,9 +33,8 @@ impl Process {
     }
 
     pub(super) async fn wait(&mut self) -> io::Result<()> {
-        // Dart's process-exit thread can reap children created through FFI.
         // A pidfd becomes readable only when this specific process exits,
-        // even after another thread has consumed its wait status.
+        // even after another child watcher has consumed its wait status.
         let _ready = self.exit.readable().await?;
         match self.child.wait().await {
             Ok(_) => Ok(()),

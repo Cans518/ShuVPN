@@ -1,0 +1,129 @@
+name: Release desktop
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            platform: windows
+            suffix: zip
+          - os: ubuntu-22.04
+            platform: linux
+            suffix: tar.gz
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Rust toolchain
+        run: rustup toolchain install 1.96.0 --profile minimal --component rustfmt --component clippy
+      - name: Linux desktop libraries
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libwebkit2gtk-4.1-dev librsvg2-dev libayatana-appindicator3-dev pkg-config libcap2-bin iproute2 python3-gi gir1.2-atspi-2.0 xvfb xdotool xauth x11-utils dbus-x11
+      - run: npm ci --prefix desktop
+      - name: Validate release metadata and tag
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            python tool/release.py check --tag "$GITHUB_REF_NAME" --clean
+          else
+            python tool/release.py check --clean
+          fi
+      - name: Windows verification
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./tool/verify_desktop.ps1 -GuiSmoke
+      - name: Linux verification
+        if: runner.os == 'Linux'
+        run: SHUVPN_GUI_SMOKE=1 bash tool/verify_desktop.sh
+      - name: Build embedded application and separate helper
+        run: |
+          cargo build --manifest-path desktop/src-tauri/Cargo.toml --target-dir rust/target --locked --release --features tauri/custom-protocol --bin shuvpn
+          cargo build --manifest-path rust/Cargo.toml --locked --release --bin shuvpn_tun_helper
+      - name: Stage and verify portable archive
+        run: |
+          python tool/stage_desktop.py --platform "${{ matrix.platform }}" --binaries rust/target/release --output build/staging --release
+          python tool/package_desktop.py release --platform "${{ matrix.platform }}" --bundle build/staging --output build/packages
+          version="$(node -p "JSON.parse(require('fs').readFileSync('desktop/package.json')).version")"
+          archive="build/packages/ShuVPN-${version}-${{ matrix.platform }}-x64.${{ matrix.suffix }}"
+          python tool/package_desktop.py verify "$archive" --release
+          echo "SHUVPN_ARCHIVE=$archive" >> "$GITHUB_ENV"
+      - name: Unpack the verified release
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          from tool.package_installers import unpack
+          destination = Path("build/release-bundle")
+          destination.mkdir()
+          unpack(Path(os.environ["SHUVPN_ARCHIVE"]), destination)
+          PY
+      - name: Windows packaged release window
+        if: runner.os == 'Windows'
+        run: node tool/tauri_windows_smoke.mjs build/release-bundle/shuvpn.exe build/release-window
+      - name: Linux packaged release window
+        if: runner.os == 'Linux'
+        run: xvfb-run -a -s "-screen 0 1024x900x24" dbus-run-session -- /usr/bin/python3 tool/tauri_linux_smoke.py --executable "$PWD/build/release-bundle/shuvpn" --report "$PWD/build/release-window"
+      - name: Portable Inno Setup compiler
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $compiler = ./tool/install_inno_setup.ps1
+          "SHUVPN_ISCC=$compiler" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+      - name: Windows installer
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: python tool/package_installers.py $env:SHUVPN_ARCHIVE --output build/packages --iscc $env:SHUVPN_ISCC --release
+      - name: Debian package
+        if: runner.os == 'Linux'
+        run: python tool/package_installers.py "$SHUVPN_ARCHIVE" --output build/packages --release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: shuvpn-${{ matrix.platform }}-x64
+          path: build/packages/*
+          if-no-files-found: error
+
+  publish:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: package
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: shuvpn-*-x64
+          path: build/packages
+          merge-multiple: true
+      - name: Verify final checksums
+        working-directory: build/packages
+        run: sha256sum --check *.sha256
+      - run: python tool/release.py notes --output build/release-notes.md
+      - name: Publish verified desktop assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" build/packages/* --verify-tag --title "ShuVPN $GITHUB_REF_NAME" --notes-file build/release-notes.md

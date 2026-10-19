@@ -2,7 +2,6 @@ use crate::auth::atrust::ATrustClient;
 pub use crate::auth::model::{AuthConfig, AuthCookie, AuthFailure, AuthSeed, AuthSession};
 pub use crate::auth::model::{TunnelOptions, TunnelPreparation};
 
-#[flutter_rust_bridge::frb(opaque)]
 pub struct ATrustAuthClient {
     inner: ATrustClient,
 }
@@ -27,13 +26,11 @@ impl ATrustAuthClient {
     }
 
     /// Cancellation does not wait for the in-flight HTTP request or state lock.
-    #[flutter_rust_bridge::frb(sync)]
     pub fn cancel(&self) {
         self.inner.cancel();
     }
 }
 
-#[flutter_rust_bridge::frb(sync)]
 pub fn generate_device_id() -> Result<String, AuthFailure> {
     crate::auth::atrust::random_hex(16)
 }

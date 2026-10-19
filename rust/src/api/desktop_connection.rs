@@ -3,11 +3,11 @@ use super::{
     routing::RoutingManager,
     vpn::{ProxyStartup, TunStartup, VpnConnectAttempt, VpnFailure, VpnSession},
 };
+use crate::connection::owner::Owner;
 pub use crate::connection::owner::{OwnerPhase, OwnerSnapshot};
-use crate::{connection::owner::Owner, frb_generated::StreamSink};
 use std::sync::{Arc, Mutex, OnceLock};
 
-// A failed close must survive a Flutter handle or widget being disposed.
+// A failed close must survive a frontend handle being disposed.
 // The process has one desktop connection authority; release only after shutdown.
 static DESKTOP: OnceLock<Mutex<Option<Arc<Owner>>>> = OnceLock::new();
 
@@ -17,7 +17,6 @@ pub struct ConnectionStartup {
     pub recovery_directory: Option<String>,
 }
 
-#[flutter_rust_bridge::frb(opaque)]
 pub struct DesktopConnectionOwner {
     inner: Arc<Owner>,
     control: Mutex<Option<u64>>,
@@ -25,7 +24,6 @@ pub struct DesktopConnectionOwner {
 
 impl DesktopConnectionOwner {
     #[cfg(test)]
-    #[flutter_rust_bridge::frb(ignore)]
     pub(crate) fn isolated() -> Self {
         Self {
             inner: Owner::spawn(),
@@ -66,7 +64,6 @@ impl DesktopConnectionOwner {
 
     /// Reserve synchronously so an older, delayed frontend cannot take control
     /// after a newer frontend has reserved it. Then await_frontend drains jobs.
-    #[flutter_rust_bridge::frb(sync)]
     pub fn claim_frontend(&self) -> Result<(), VpnFailure> {
         let mut control = self
             .control
@@ -84,7 +81,6 @@ impl DesktopConnectionOwner {
             .ok_or_else(|| VpnFailure::new("state", "尚未取得前端控制标识"))?;
         self.inner.await_control(control).await
     }
-    #[flutter_rust_bridge::frb(ignore)]
     fn control_value(&self) -> Result<Option<u64>, VpnFailure> {
         self.control
             .lock()
@@ -159,11 +155,9 @@ impl DesktopConnectionOwner {
             .map(VpnSession::from_owned)
     }
 
-    #[flutter_rust_bridge::frb(sync)]
     pub fn snapshot(&self) -> Result<OwnerSnapshot, VpnFailure> {
         self.inner.snapshot()
     }
-    #[flutter_rust_bridge::frb(sync)]
     pub fn cancel(&self) -> Result<(), VpnFailure> {
         self.inner.cancel(self.control_value()?)
     }
@@ -184,20 +178,8 @@ impl DesktopConnectionOwner {
         }
         Ok(result)
     }
-    pub async fn events(&self, sink: StreamSink<OwnerSnapshot>) {
-        let mut events = self.inner.events();
-        tokio::spawn(async move {
-            loop {
-                let snapshot = events.borrow_and_update().clone();
-                let closed = snapshot.closed;
-                if sink.add(snapshot).is_err() || closed {
-                    break;
-                }
-                if events.changed().await.is_err() {
-                    break;
-                }
-            }
-        });
+    pub fn events(&self) -> tokio::sync::watch::Receiver<OwnerSnapshot> {
+        self.inner.events()
     }
 }
 

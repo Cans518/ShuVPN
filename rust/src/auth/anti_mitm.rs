@@ -38,7 +38,7 @@ pub(crate) fn verify(envelope: &Value) -> Result<Vec<String>, AuthFailure> {
     let mut fields = BTreeMap::new();
     collect(envelope, &mut fields, 0)?;
     let mut fields: Vec<_> = fields.into_iter().collect();
-    // The gateway SDK sorts Dart strings by UTF-16 code units.
+    // Gateway canonicalization orders strings by UTF-16 code units.
     fields.sort_by(|(left, _), (right, _)| left.encode_utf16().cmp(right.encode_utf16()));
     let message = fields
         .into_iter()

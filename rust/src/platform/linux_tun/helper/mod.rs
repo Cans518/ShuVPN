@@ -1,4 +1,4 @@
-//! Capability boundary. The Flutter executable never acquires file capabilities.
+//! Capability boundary. The desktop executable never acquires file capabilities.
 mod broker;
 mod client;
 mod process;

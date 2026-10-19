@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 if sys.platform == "linux":
     specification = importlib.util.spec_from_file_location(
-        "linux_install", Path(__file__).resolve().parents[2] / "linux/install.py"
+        "linux_install", Path(__file__).resolve().parents[2] / "packaging/linux/install.py"
     )
     installer = importlib.util.module_from_spec(specification)
     specification.loader.exec_module(installer)
@@ -89,6 +89,12 @@ class LinuxInstallTest(unittest.TestCase):
                 del self.manifest["files"][name]
 
     def test_symlinked_parent_in_source_is_rejected(self) -> None:
+        nested = self.bundle / "lib/optional.dat"
+        nested.parent.mkdir()
+        nested.write_bytes(b"optional")
+        self.manifest["files"]["lib/optional.dat"] = {
+            "size": 8, "sha256": hashlib.sha256(b"optional").hexdigest(),
+        }
         (self.bundle / "lib").rename(self.bundle / "linked-lib")
         (self.bundle / "lib").symlink_to(self.bundle / "linked-lib", target_is_directory=True)
         target = self.directory / "copied"

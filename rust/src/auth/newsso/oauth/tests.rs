@@ -487,8 +487,7 @@ async fn state_callback_origin_hops_and_markers_fail_closed_without_publishing_c
 }
 
 #[tokio::test]
-async fn shared_account_atrust_uses_native_ticket_csrf_chain_without_dart_cookie_roundtrip(
-) -> anyhow::Result<()> {
+async fn shared_account_atrust_uses_native_ticket_csrf_chain() -> anyhow::Result<()> {
     let fixture = Fixture::new(Scenario::Normal).await?;
     let receipt = fixture
         .client

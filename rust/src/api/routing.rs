@@ -1,5 +1,5 @@
-use crate::frb_generated::StreamSink;
 pub use crate::routing::model::RoutingFailure;
+pub use crate::routing::model::RoutingStatus;
 use crate::routing::{
     engine::Evaluation,
     model::{ConfigurationInfo, Flow},
@@ -7,12 +7,10 @@ use crate::routing::{
 };
 use std::sync::Arc;
 
-#[flutter_rust_bridge::frb(opaque)]
 pub struct RoutingManager {
     pub(crate) store: Arc<RoutingStore>,
 }
 
-#[flutter_rust_bridge::frb(opaque)]
 pub struct RoutingPreview {
     store: Arc<RoutingStore>,
     prepared: crate::routing::store::Prepared,
@@ -65,22 +63,8 @@ impl RoutingManager {
         encode_info(&self.store.refresh(expected_version).await?)
     }
 
-    pub async fn updates(&self, sink: StreamSink<String>) {
-        let mut receiver = self.store.updates();
-        tokio::spawn(async move {
-            loop {
-                let status = receiver.borrow_and_update().clone();
-                let Ok(encoded) = encode_status(&status) else {
-                    break;
-                };
-                if sink.add(encoded).is_err() {
-                    break;
-                }
-                if receiver.changed().await.is_err() {
-                    break;
-                }
-            }
-        });
+    pub fn updates(&self) -> tokio::sync::watch::Receiver<RoutingStatus> {
+        self.store.updates()
     }
 
     pub async fn preview(

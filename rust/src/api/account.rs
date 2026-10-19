@@ -6,7 +6,6 @@ pub use crate::auth::newsso::account::verification::VerificationState;
 use crate::auth::newsso::account::Account;
 pub use crate::auth::newsso::model::{QrSession, QrStatus, VerificationTarget};
 
-#[flutter_rust_bridge::frb(opaque)]
 pub struct AccountSession {
     pub(crate) inner: std::sync::Arc<Account>,
 }
@@ -26,14 +25,11 @@ impl AccountSession {
     pub async fn sign_in_code(&self, method: String, code: String) -> Result<(), AuthFailure> {
         self.inner.sign_in_code(method, code).await
     }
-    pub async fn sign_in_qr(&self, sink: crate::frb_generated::StreamSink<QrSignInEvent>) {
-        if let Err(error) = self.inner.sign_in_qr(|event| sink.add(event).is_ok()).await {
-            let _ = sink.add(QrSignInEvent {
-                phase: QrSignInPhase::Failed,
-                image: None,
-                error: Some(error),
-            });
-        }
+    pub async fn sign_in_qr(
+        &self,
+        emit: impl FnMut(QrSignInEvent) -> bool + Send,
+    ) -> Result<bool, AuthFailure> {
+        self.inner.sign_in_qr(emit).await
     }
     pub fn open(
         directory: String,
@@ -51,7 +47,6 @@ impl AccountSession {
             )?),
         })
     }
-    #[flutter_rust_bridge::frb(sync)]
     pub fn snapshot(&self) -> Result<Snapshot, AuthFailure> {
         self.inner.snapshot()
     }
@@ -67,11 +62,9 @@ impl AccountSession {
     pub async fn send_code(&self, method: String) -> Result<(), AuthFailure> {
         self.inner.send_code(method).await
     }
-    #[flutter_rust_bridge::frb(sync)]
     pub fn verification_state(&self) -> Result<Option<VerificationState>, AuthFailure> {
         self.inner.verification_state()
     }
-    #[flutter_rust_bridge::frb(sync)]
     pub fn select_verification_method(&self, method: String) -> Result<(), AuthFailure> {
         self.inner.select_verification_method(method)
     }
@@ -112,23 +105,18 @@ impl AccountSession {
             inner: self.inner.prepare_tunnel(strict_anti_mitm).await?,
         })
     }
-    #[flutter_rust_bridge::frb(sync)]
     pub fn cancel_qr(&self) -> Result<(), AuthFailure> {
         self.inner.cancel_qr()
     }
-    #[flutter_rust_bridge::frb(sync)]
     pub fn cancel_work(&self) -> Result<(), AuthFailure> {
         self.inner.cancel_work()
     }
-    #[flutter_rust_bridge::frb(sync)]
     pub fn clear_session_expired(&self) -> Result<(), AuthFailure> {
         self.inner.clear_session_expired()
     }
-    #[flutter_rust_bridge::frb(sync)]
     pub fn sign_out(&self) -> Result<(), AuthFailure> {
         self.inner.sign_out()
     }
-    #[flutter_rust_bridge::frb(sync)]
     pub fn close(&self) -> Result<(), AuthFailure> {
         self.inner.close()
     }

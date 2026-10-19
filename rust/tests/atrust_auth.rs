@@ -159,6 +159,11 @@ async fn preparation_verifies_auth_fetches_resources_and_uses_rotated_sid() -> a
     assert_eq!(plan.sid, prepared.session.sid);
     assert_eq!(plan.connection_id, "fixture-connection");
     assert_eq!(plan.process_platform, "Windows");
+    assert_eq!(plan.process_name, "shuvpn");
+    assert_eq!(
+        std::path::PathBuf::from(&plan.process_path),
+        std::env::current_exe()?
+    );
     assert_eq!(plan.routes[0].host, "fixture.shu.edu.cn");
     assert_eq!(plan.routes[0].port_max, 445);
     assert_eq!(plan.nodes["campus"], ["127.0.0.1:441"]);
@@ -602,7 +607,7 @@ async fn oauth_ticket_csrf_and_cookies_roundtrip_without_redirect_following() ->
 }
 
 #[test]
-fn native_device_id_has_the_persisted_dart_format() -> anyhow::Result<()> {
+fn device_id_is_32_lowercase_hex_characters() -> anyhow::Result<()> {
     let device = shuvpn_core::api::atrust_auth::generate_device_id()?;
     assert_eq!(device.len(), 32);
     assert!(device
