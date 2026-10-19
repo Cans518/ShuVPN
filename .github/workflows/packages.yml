@@ -28,7 +28,19 @@ jobs:
       - name: Windows WebView2 Runtime
         shell: pwsh
         timeout-minutes: 5
-        run: ./tool/install_webview2.ps1
+        run: ./tool/install_webview2.ps1 -Refresh
+      - name: Verify child browser-argument environment
+        shell: bash
+        run: |
+          node --input-type=module <<'JS'
+          import { spawnSync } from "node:child_process";
+          const key = "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS";
+          const expected = "--remote-debugging-port=9991";
+          const environment = { ...process.env, [key]: expected };
+          const result = spawnSync(process.execPath, ["-e", `process.stdout.write(process.env.${key} ?? "")`], { env: environment, encoding: "utf8" });
+          if (result.status !== 0 || result.stdout !== expected) throw new Error("WebView2 arguments were not forwarded to the child environment");
+          console.log("WebView2 child environment passed");
+          JS
       - name: Download published Windows archive
         shell: pwsh
         env:
@@ -60,8 +72,6 @@ jobs:
           PY
       - name: Published Windows full WebView suite
         shell: bash
-        env:
-          SHUVPN_WEBVIEW2_DEBUG_TRANSPORT: registry
         run: node tool/tauri_windows_smoke.mjs build/release-bundle/shuvpn.exe build/release-window
       - name: GUI probe diagnostics
         if: always()

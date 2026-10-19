@@ -4,6 +4,7 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
+$principal = [Security.Principal.WindowsPrincipal]::new([Security.Principal.WindowsIdentity]::GetCurrent())
 Add-Type -TypeDefinition @'
 using System;
 using System.Collections.Generic;
@@ -74,6 +75,7 @@ foreach ($location in @('HKLM:\SOFTWARE\Policies\Microsoft\Edge', 'HKCU:\SOFTWAR
     HostWindowStation = [ShuWebViewSnapshot]::ObjectName([ShuWebViewSnapshot]::GetProcessWindowStation())
     HostDesktop = [ShuWebViewSnapshot]::ObjectName([ShuWebViewSnapshot]::GetThreadDesktop([ShuWebViewSnapshot]::GetCurrentThreadId()))
     Interactive = [Environment]::UserInteractive
+    Administrator = $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
     SessionId = [Diagnostics.Process]::GetCurrentProcess().SessionId
     Processes = $tree
     Windows = @([ShuWebViewSnapshot]::Windows([uint32]$ApplicationPid))

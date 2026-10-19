@@ -19,7 +19,6 @@ const productHash = createHash("sha256").update(await readFile(executable)).dige
 const expectedVersion = JSON.parse(await readFile(path.resolve("desktop/package.json"), "utf8")).version;
 const runs = [];
 const nativeTray = process.argv.includes("--native-tray");
-const profileDebugPort = await port();
 let startupRegistrationTested = false;
 
 async function settle(cdp) {
@@ -173,11 +172,12 @@ async function connectCdp(debugPort, child, discovery) {
   return { socket, send, evaluate, exceptions };
 }
 
-async function windowsJson(script, args) {
+async function snapshotStartup(child, debugPort) {
   const powershell = path.join(process.env.SystemRoot, "System32/WindowsPowerShell/v1.0/powershell.exe");
   const shell = spawn(powershell, [
     "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-File",
-    path.resolve("tool", script), ...args,
+    path.resolve("tool/windows_webview_snapshot.ps1"), "-ApplicationPid", String(child.pid),
+    "-DebugPort", String(debugPort),
   ], { windowsHide: true, timeout: 10000, stdio: ["ignore", "pipe", "pipe"] });
   const output = [];
   const errors = [];
@@ -210,25 +210,11 @@ if (-not [ShuTauriClose]::PostMessage($target.MainWindowHandle, 0x0010, [IntPtr]
 }
 
 async function launch(index, scenario) {
-  const debugPort = profileDebugPort;
-  const registryMode = process.env.SHUVPN_WEBVIEW2_DEBUG_TRANSPORT === "registry"
-    && path.basename(executable).toLowerCase() === "shuvpn.exe";
-  const policyState = path.join(report, `.webview2-registry-${index}.json`);
-  const environment = { ...process.env };
-  if (registryMode) {
-    await windowsJson("windows_webview_debug_policy.ps1", [
-      "-Action", "Set", "-StatePath", policyState, "-DebugPort", String(debugPort),
-    ]);
-    for (const key of Object.keys(environment)) {
-      if (key.toUpperCase() === "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS") delete environment[key];
-    }
-  } else {
-    environment.WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = `--remote-debugging-address=127.0.0.1 --remote-debugging-port=${debugPort}`;
-  }
+  const debugPort = await port();
   const output = [];
   const child = spawn(executable, [...(index === 2 ? ["--hidden"] : []), "--data-dir", profile], {
     windowsHide: true,
-    env: environment,
+    env: { ...process.env, WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-address=127.0.0.1 --remote-debugging-port=${debugPort}` },
     stdio: ["ignore", "pipe", "pipe"],
   });
   child.stdout.on("data", (chunk) => output.push(chunk));
@@ -236,7 +222,6 @@ async function launch(index, scenario) {
   const exit = once(child, "exit");
   const run = {
     index, pid: child.pid, passed: false, startedAt: new Date().toISOString(),
-    debugTransport: registryMode ? "registry" : "environment",
     discovery: { debugPort, attempts: 0, lastStatus: null, lastTargets: [], lastError: null },
   };
   child.on("exit", (code, signal) => {
@@ -295,9 +280,7 @@ async function launch(index, scenario) {
     run.exitSignalBeforeCleanup = child.signalCode;
     if (!cdp && child.exitCode === null && child.signalCode === null) {
       try {
-        run.startupSnapshot = await windowsJson("windows_webview_snapshot.ps1", [
-          "-ApplicationPid", String(child.pid), "-DebugPort", String(debugPort),
-        ]);
+        run.startupSnapshot = await snapshotStartup(child, debugPort);
         await writeFile(path.join(report, `failure-startup-${index}.json`), JSON.stringify(run.startupSnapshot, null, 2));
       } catch (snapshotError) {
         run.startupSnapshotError = String(snapshotError);
@@ -329,17 +312,6 @@ async function launch(index, scenario) {
       run.forcedCleanup = true;
     }
     await writeFile(path.join(report, `process-${index}.log`), Buffer.concat(output));
-    if (registryMode) {
-      try {
-        await windowsJson("windows_webview_debug_policy.ps1", ["-Action", "Restore", "-StatePath", policyState]);
-      } catch (restoreError) {
-        run.registryRestoreError = String(restoreError);
-        if (run.passed) {
-          run.passed = false;
-          throw restoreError;
-        }
-      }
-    }
     if (!run.passed) console.error(JSON.stringify({ ...run, output: Buffer.concat(output).toString("utf8") }, null, 2));
   }
 }
