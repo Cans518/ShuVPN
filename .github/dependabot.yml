@@ -9,10 +9,6 @@ updates:
     schedule:
       interval: monthly
   - package-ecosystem: cargo
-    directory: /rust
-    schedule:
-      interval: monthly
-  - package-ecosystem: cargo
-    directory: /desktop/src-tauri
+    directory: /
     schedule:
       interval: monthly

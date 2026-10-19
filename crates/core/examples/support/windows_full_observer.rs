@@ -64,7 +64,7 @@ async fn snapshot(scope: &str, sid: &str) -> anyhow::Result<Value> {
     // The privileged observer never executes a mutable client-supplied script.
     let script = format!(
         "& {{\n{}\n}} -Scope '{scope}' -UserSid '{sid}' -Utf8Stdout",
-        include_str!("../../../tool/full_capture_windows_snapshot.ps1")
+        include_str!("../../../../tool/full_capture_windows_snapshot.ps1")
     );
     let encoded = STANDARD.encode(
         script

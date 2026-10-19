@@ -13,7 +13,7 @@ use tokio::{
 
 // Reuse the protocol fixture, never a school endpoint or a real account.
 #[allow(dead_code)]
-#[path = "../../../rust/tests/support/gateway.rs"]
+#[path = "../../../crates/core/tests/support/gateway.rs"]
 mod gateway;
 
 async fn echo_http(port: u16) -> anyhow::Result<()> {

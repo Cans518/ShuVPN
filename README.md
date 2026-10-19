@@ -2,7 +2,7 @@
 
 连接上海大学校园网络的 Windows 与 Linux 桌面客户端。
 
-**0.6.0** · [下载安装](#下载安装) · [使用指南](docs/user-guide.md) · [自定义主题](docs/themes.md) · [更新记录](CHANGELOG.md)
+**0.6.1** · [下载安装](#下载安装) · [使用指南](docs/user-guide.md) · [自定义主题](docs/themes.md) · [更新记录](CHANGELOG.md)
 
 <p>
   <img src="docs/screenshots/home-light.png" alt="ShuVPN 浅色连接界面" width="300">
@@ -40,6 +40,8 @@ Windows 需要 Microsoft Edge WebView2 Runtime。Linux 面向 Ubuntu 22.04 及�
 
 ## 参与项目
 
-开发与构建见[开发指南](docs/development.md)，模块边界见[架构](docs/architecture.md)，发布流程见[发布指南](docs/releasing.md)。贡献前请阅读 [CONTRIBUTING.md](CONTRIBUTING.md) 和[行为准则](CODE_OF_CONDUCT.md)；安全问题按 [SECURITY.md](SECURITY.md) 私密报告。
+开发、模块边界与验证见[开发指南](docs/development.md)，发布流程见[发布指南](docs/releasing.md)。贡献前请阅读 [CONTRIBUTING.md](CONTRIBUTING.md) 和[行为准则](CODE_OF_CONDUCT.md)；安全问题按 [SECURITY.md](SECURITY.md) 私密报告。
+
+仓库按职责组织：`desktop/` 放桌面界面与宿主，`crates/core/` 放共用连接核心，`packaging/` 放安装模板，`tool/` 与 `tests/tool/` 放开发工具及其测试。第一方 Rust 包由根 Cargo workspace 统一构建；协议快照位于 `third_party/`，保留独立来源与许可。
 
 项目采用 [AGPL-3.0](LICENSE)。Pico CSS、Lucide/Feather、霞鹜文楷 GB 与协议模块的许可见 [THIRD_PARTY_NOTICES.md](desktop/THIRD_PARTY_NOTICES.md)，也可在应用内查看。Windows 分发包附带 Wintun 驱动许可。

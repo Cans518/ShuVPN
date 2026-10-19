@@ -5,7 +5,7 @@ main() {
   [[ "$(id -u)" == 0 ]] || { echo "Run the isolated helper probe as root" >&2; exit 1; }
   local repo_root profile probe_dir helper_source
   repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-  profile="${1:-$repo_root/rust/target/release}"
+  profile="${1:-$repo_root/target/release}"
   helper_source="${2:-$profile/shuvpn_tun_helper}"
   [[ -x "$helper_source" && -x "$profile/examples/linux_tun_helper_smoke" ]] ||
     { echo "Build shuvpn_tun_helper and linux_tun_helper_smoke with tun-probe first" >&2; exit 1; }

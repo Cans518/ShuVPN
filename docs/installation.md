@@ -14,8 +14,8 @@
 PowerShell 校验示例：
 
 ```powershell
-Get-FileHash .\ShuVPN-0.6.0-windows-x64-setup.exe -Algorithm SHA256
-Get-Content .\ShuVPN-0.6.0-windows-x64-setup.exe.sha256
+Get-FileHash .\ShuVPN-0.6.1-windows-x64-setup.exe -Algorithm SHA256
+Get-Content .\ShuVPN-0.6.1-windows-x64-setup.exe.sha256
 ```
 
 ## Debian / Ubuntu
@@ -23,7 +23,7 @@ Get-Content .\ShuVPN-0.6.0-windows-x64-setup.exe.sha256
 面向 Ubuntu 22.04 及兼容的 x64 图形桌面。DEB 包会声明 WebKitGTK、GTK、AppIndicator 和安装工具依赖：
 
 ```bash
-sudo apt install ./ShuVPN-0.6.0-linux-x64.deb
+sudo apt install ./ShuVPN-0.6.1-linux-x64.deb
 ```
 
 从应用菜单启动 ShuVPN，使用普通用户运行图形界面。需要 TUN 时，将当前用户加入授权组，然后注销并重新登录：
@@ -45,7 +45,7 @@ sudo python3 ./install.py --user "$USER"
 安装脚本将 GUI 放入 `/opt/shuvpn`、受限 helper 放入 `/usr/lib/shuvpn`。不要给 GUI 可执行文件授予文件能力；不要用便携安装脚本覆盖 DEB 管理的安装。
 
 ```bash
-sha256sum -c ShuVPN-0.6.0-linux-x64.tar.gz.sha256
+sha256sum -c ShuVPN-0.6.1-linux-x64.tar.gz.sha256
 ```
 
 ## 升级和移除

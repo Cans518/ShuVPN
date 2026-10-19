@@ -122,14 +122,14 @@ def source_identity() -> dict[str, object]:
         raise ValueError("Source revision must be a full Git commit hash")
     fingerprint = hashlib.sha256()
     paths = []
-    for directory in ("desktop", "rust", "third_party", "packaging", "tool", "test", ".github"):
+    for directory in ("desktop", "crates", "third_party", "packaging", "tool", "tests", ".github"):
         for current, directories, filenames in os.walk(ROOT / directory):
             directories[:] = sorted(
                 name for name in directories
                 if name not in ("target", "build", "dist", "node_modules", "gen", "__pycache__")
             )
             paths.extend(Path(current) / name for name in filenames)
-    paths.extend(ROOT / name for name in ("LICENSE", "README.md", "rust-toolchain.toml"))
+    paths.extend(ROOT / name for name in ("Cargo.toml", "Cargo.lock", "LICENSE", "README.md", "rust-toolchain.toml"))
     for path in sorted(paths, key=lambda path: path.relative_to(ROOT).as_posix()):
         fingerprint.update(path.relative_to(ROOT).as_posix().encode("utf-8") + b"\0")
         fingerprint.update(bytes.fromhex(digest(path.read_bytes())))

@@ -17,7 +17,7 @@ class ReleaseMetadataTest(unittest.TestCase):
         }))
         self.write("desktop/src-tauri/tauri.conf.json", '{"version":"0.6.0"}')
         self.write("desktop/src-tauri/Cargo.toml", '[package]\nname = "shuvpn_desktop"\nversion = "0.6.0"\n')
-        self.write("desktop/src-tauri/Cargo.lock", '[[package]]\nname = "shuvpn_desktop"\nversion = "0.6.0"\n')
+        self.write("Cargo.lock", '[[package]]\nname = "shuvpn_desktop"\nversion = "0.6.0"\n')
         self.write("CHANGELOG.md", "# Changes\n\n## 0.6.0 - 2026-10-19\n\n- Desktop release.\n\n## 0.5.1 - 2026-10-18\n\n- Older release.\n")
 
     def write(self, name, content):
@@ -28,7 +28,7 @@ class ReleaseMetadataTest(unittest.TestCase):
     def test_all_application_versions_and_lock_entries_must_agree(self):
         self.assertEqual(release_version(self.root), "0.6.0")
         for name in ("desktop/src-tauri/tauri.conf.json", "desktop/package-lock.json",
-                     "desktop/src-tauri/Cargo.toml", "desktop/src-tauri/Cargo.lock"):
+                     "desktop/src-tauri/Cargo.toml", "Cargo.lock"):
             with self.subTest(name=name):
                 path = self.root / name
                 original = path.read_text(encoding="utf-8")

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(dirname "$0")/.."
-probe_exe="$(pwd)/rust/target/release/examples/tun_namespace_smoke"
+probe_exe="$(pwd)/target/release/examples/tun_namespace_smoke"
 [[ -x "$probe_exe" ]] || { echo "Build tun_namespace_smoke first"; exit 1; }
 [[ "$(id -u)" == 0 ]] || { echo "Run this isolated probe as root"; exit 1; }
 probe_dir="$(mktemp -d /tmp/shuvpn-tun-probe.XXXXXXXX)"

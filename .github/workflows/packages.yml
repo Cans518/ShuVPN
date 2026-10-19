@@ -35,7 +35,7 @@ jobs:
         with:
           python-version: "3.12"
       - name: Rust toolchain
-        run: rustup toolchain install 1.96.0 --profile minimal --component rustfmt --component clippy
+        run: rustup show active-toolchain
       - name: Linux desktop libraries
         if: runner.os == 'Linux'
         run: |
@@ -55,14 +55,14 @@ jobs:
         run: ./tool/verify_desktop.ps1 -GuiSmoke
       - name: Linux verification
         if: runner.os == 'Linux'
-        run: SHUVPN_GUI_SMOKE=1 bash tool/verify_desktop.sh
+        run: SHUVPN_GUI_SMOKE=1 SHUVPN_NETWORK_SMOKE=1 bash tool/verify_desktop.sh
       - name: Build embedded application and separate helper
         run: |
-          cargo build --manifest-path desktop/src-tauri/Cargo.toml --target-dir rust/target --locked --release --features tauri/custom-protocol --bin shuvpn
-          cargo build --manifest-path rust/Cargo.toml --locked --release --bin shuvpn_tun_helper
+          cargo build --locked -p shuvpn_desktop --release --features tauri/custom-protocol --bin shuvpn
+          cargo build --locked -p shuvpn_core --release --bin shuvpn_tun_helper
       - name: Stage and verify portable archive
         run: |
-          python tool/stage_desktop.py --platform "${{ matrix.platform }}" --binaries rust/target/release --output build/staging --release
+          python tool/stage_desktop.py --platform "${{ matrix.platform }}" --binaries target/release --output build/staging --release
           python tool/package_desktop.py release --platform "${{ matrix.platform }}" --bundle build/staging --output build/packages
           version="$(node -p "JSON.parse(require('fs').readFileSync('desktop/package.json')).version")"
           archive="build/packages/ShuVPN-${version}-${{ matrix.platform }}-x64.${{ matrix.suffix }}"

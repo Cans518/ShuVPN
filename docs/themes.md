@@ -36,17 +36,4 @@
 
 颜色必须是 `#RRGGBB`，不能注入 CSS、URL 或脚本；导入文件上限为 16 KiB。主按钮文字会根据主题色自动选择黑色或白色。建议正文与背景至少保持 4.5:1 对比度，并在两种外观下检查焦点和禁用状态。
 
-宿主 commands `appearance_current`、`appearance_save` 读写以下数据：
-
-```json
-{
-  "palette": "custom",
-  "customTheme": {
-    "name": "主题名称",
-    "light": { "accent": "#2864ad", "canvas": "#f3f6fb", "surface": "#ffffff", "ink": "#25364b", "muted": "#5c6b80", "border": "#dce4ef" },
-    "dark": { "accent": "#99c2ff", "canvas": "#141c29", "surface": "#1c2838", "ink": "#e5edf8", "muted": "#a6b7cd", "border": "#35465d" }
-  }
-}
-```
-
-`palette` 接受 `ocean`、`jade`、`iris`、`amber` 或 `custom`。宿主再次校验字段和颜色；保存失败时保持上一次配置。主题保存在应用数据目录中的 `appearance.json`，与网络和账户配置分开。
+主题保存在应用数据目录中的 `appearance.json`，与网络和账户配置分开。保存失败时保持上一次配置。

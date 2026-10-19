@@ -30,7 +30,7 @@ def release_version(root: Path = ROOT) -> str:
     if block is None:
         raise ValueError("Missing desktop Cargo package")
     package_name = _toml_value(block[1], "name")
-    cargo_lock = (root / "desktop/src-tauri/Cargo.lock").read_text(encoding="utf-8")
+    cargo_lock = (root / "Cargo.lock").read_text(encoding="utf-8")
     resolved = next((entry for entry in re.split(r"(?m)^\[\[package\]\]\s*$", cargo_lock)[1:]
                      if re.search(rf'(?m)^name = "{re.escape(package_name)}"$', entry)), None)
     if resolved is None:

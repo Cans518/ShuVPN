@@ -303,7 +303,7 @@ def main():
         )
     binary = (
         Path(sys.argv[2]).resolve() / "examples/packet_namespace_smoke" if desktop
-        else Path(os.environ.get("SHUVPN_PROBE_PROFILE", str(root / "rust/target/release"))) /
+        else Path(os.environ.get("SHUVPN_PROBE_PROFILE", str(root / "target/release"))) /
              ("examples/egress_namespace_smoke" if egress else "examples/packet_namespace_smoke")
     )
     if not binary.is_file():

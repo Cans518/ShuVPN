@@ -3,7 +3,8 @@ build/
 coverage/
 
 # Rust build artifacts; Cargo.lock stays tracked.
-/rust/target/
+/target/
+/crates/*/target/
 /third_party/sangfor/target/
 /desktop/src-tauri/target/
 /desktop/node_modules/

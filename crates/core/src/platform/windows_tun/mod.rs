@@ -456,7 +456,7 @@ mod tests {
 
     fn driver_path() -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../desktop/resources/wintun/amd64/wintun.dll")
+            .join("../../desktop/resources/wintun/amd64/wintun.dll")
             .canonicalize()
             .unwrap_or_else(|_| PathBuf::from("invalid"))
     }

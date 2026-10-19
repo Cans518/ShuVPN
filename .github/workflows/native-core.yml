@@ -1,9 +1,9 @@
-name: Rust core and Tauri desktop
+name: Verify ShuVPN
 
 on:
   push:
     branches: [main, "release/**"]
-    paths: ["rust/**", "third_party/**", "desktop/**", "packaging/**", "tool/**", "test/**", ".github/**"]
+    paths: ["Cargo.toml", "Cargo.lock", "rust-toolchain.toml", "crates/**", "third_party/**", "desktop/**", "packaging/**", "tool/**", "tests/**", ".github/**"]
   pull_request:
     branches: [main]
 
@@ -40,55 +40,19 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends libwebkit2gtk-4.1-dev librsvg2-dev libayatana-appindicator3-dev pkg-config libcap2-bin iproute2 python3-gi gir1.2-atspi-2.0 xvfb xdotool xauth x11-utils dbus-x11
       - name: Rust toolchain
-        run: |
-          rustup toolchain install 1.96.0 --profile minimal --component rustfmt --component clippy
-          rustup default 1.96.0
+        run: rustup show active-toolchain
       - run: npm ci --prefix desktop
-      - run: python tool/release.py check
-      - run: npm run build --prefix desktop
-      - name: Native formats, lint and packaging contracts
-        run: |
-          cargo fmt --manifest-path rust/Cargo.toml --check
-          cargo fmt --manifest-path desktop/src-tauri/Cargo.toml --check
-          cargo clippy --manifest-path rust/Cargo.toml --locked --all-targets --all-features -- -D warnings
-          cargo clippy --manifest-path desktop/src-tauri/Cargo.toml --target-dir rust/target --locked --all-targets -- -D warnings
-          python -m unittest discover -s test/tool -p 'test_*.py'
-          cargo test --manifest-path third_party/sangfor/Cargo.toml --target-dir rust/target --workspace --locked
-      - name: Windows core and Tauri tests
+      - name: Windows verification and real WebView
         if: runner.os == 'Windows'
-        env:
-          SHUVPN_WINTUN_DLL: ${{ github.workspace }}/desktop/resources/wintun/amd64/wintun.dll
-        run: |
-          cargo test --manifest-path rust/Cargo.toml --locked --all-features --all-targets
-          cargo test --manifest-path desktop/src-tauri/Cargo.toml --target-dir rust/target --locked --all-targets
-      - name: Linux native tests in an isolated network
+        shell: pwsh
+        run: ./tool/verify_desktop.ps1 -GuiSmoke
+      - name: Linux verification, network namespaces and real WebKit
         if: runner.os == 'Linux'
-        run: |
-          sudo bash tool/rust_linux_namespace_tests.sh "$(id -un)" "$(command -v cargo)" --locked --all-features --all-targets
-          cargo test --manifest-path desktop/src-tauri/Cargo.toml --target-dir rust/target --locked --all-targets
-      - name: Linux TUN, DNS, egress and helper cleanup
-        if: runner.os == 'Linux'
-        run: |
-          cargo build --manifest-path rust/Cargo.toml --locked --release --lib --examples
-          sudo bash tool/tun_linux_namespace_smoke.sh
-          sudo bash tool/tun_dns_linux_smoke.sh
-          sudo unshare --net python3 tool/tun_data_plane_linux_smoke.py
-          cargo build --manifest-path rust/Cargo.toml --locked --release --features tun-probe,egress-probe --bin shuvpn_tun_helper --examples
-          sudo unshare --net python3 tool/tun_data_plane_linux_smoke.py --egress
-          sudo bash tool/tun_linux_helper_smoke.sh
-          sudo unshare --net python3 tool/tun_data_plane_linux_smoke.py --desktop-helper rust/target/release rust/target/release/shuvpn_tun_helper
-          sudo unshare --net python3 tool/tun_data_plane_linux_smoke.py --desktop-helper-crash rust/target/release rust/target/release/shuvpn_tun_helper
-      - name: Build desktop and helper
-        run: |
-          cargo build --manifest-path desktop/src-tauri/Cargo.toml --target-dir rust/target --locked --features tauri/custom-protocol --bin shuvpn
-          cargo build --manifest-path rust/Cargo.toml --locked --bin shuvpn_tun_helper
-          mkdir -p build/desktop/tauri
-      - name: Windows real WebView
+        run: SHUVPN_GUI_SMOKE=1 SHUVPN_NETWORK_SMOKE=1 bash tool/verify_desktop.sh
+      - name: Windows release core and examples
         if: runner.os == 'Windows'
-        run: node tool/tauri_windows_smoke.mjs rust/target/debug/shuvpn.exe build/desktop/tauri/webview
-      - name: Linux real WebKit
-        if: runner.os == 'Linux'
-        run: xvfb-run -a -s "-screen 0 1024x900x24" dbus-run-session -- /usr/bin/python3 tool/tauri_linux_smoke.py --executable "$PWD/rust/target/debug/shuvpn" --report "$PWD/build/desktop/tauri/webview"
+        run: |
+          cargo build --locked -p shuvpn_core --release --lib --examples
       - uses: actions/upload-artifact@v4
         if: always()
         with:

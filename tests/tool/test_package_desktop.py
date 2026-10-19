@@ -14,6 +14,7 @@ from tool.package_desktop import (
     app_version,
     package_bundle,
     package_release,
+    source_identity,
     verify_package,
     verify_release_package,
 )
@@ -29,6 +30,35 @@ def fixture_binary(platform: str) -> bytes:
         content[:6] = b"\x7fELF\x02\x01"
         struct.pack_into("<H", content, 18, 62)
     return bytes(content)
+
+
+class SourceIdentityTest(unittest.TestCase):
+    def test_workspace_manifests_and_moved_sources_participate_in_fingerprint(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            names = ("Cargo.toml", "Cargo.lock", "LICENSE", "README.md", "rust-toolchain.toml",
+                     "crates/core/src/lib.rs", "tests/tool/test_release.py", "desktop/src/main.ts")
+            for name in names:
+                path = root / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("original", encoding="utf-8")
+            with patch("tool.package_desktop.ROOT", root), patch.dict("os.environ", {
+                "SHUVPN_SOURCE_REVISION": "a" * 40, "SHUVPN_SOURCE_DIRTY": "false",
+            }):
+                original = source_identity()
+                self.assertEqual(original["file_count"], len(names))
+                for name in names:
+                    with self.subTest(name=name):
+                        path = root / name
+                        path.write_text("modified", encoding="utf-8")
+                        self.assertNotEqual(source_identity()["tree_sha256"], original["tree_sha256"])
+                        path.write_text("original", encoding="utf-8")
+                for name in ("target/debug/shuvpn", "crates/core/target/cache",
+                             "desktop/node_modules/cache", "desktop/dist/index.html"):
+                    path = root / name
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.write_text("build output", encoding="utf-8")
+                self.assertEqual(source_identity(), original)
 
 
 class DesktopBundleFixture:

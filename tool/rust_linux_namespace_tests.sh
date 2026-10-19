@@ -21,7 +21,7 @@ main() {
     cd "$repo_root"
     exec runuser -u "$account" -- /usr/bin/env \
       "PATH=$(dirname "$cargo_program"):$PATH" \
-      "$cargo_program" test --manifest-path rust/Cargo.toml "$@"
+      "$cargo_program" test -p shuvpn_core "$@"
   ' rust-tests "$account" "$cargo_program" "$repo_root" "$baseline" "$@"
 }
 

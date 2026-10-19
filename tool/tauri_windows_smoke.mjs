@@ -22,12 +22,17 @@ const nativeTray = process.argv.includes("--native-tray");
 let startupRegistrationTested = false;
 
 async function settle(cdp) {
-  await cdp.evaluate(`(async () => {
-    await document.fonts.ready;
-    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-    await Promise.all(document.getAnimations().filter(animation => animation.effect?.getComputedTiming().iterations !== Infinity)
-      .map(animation => animation.finished.catch(() => {})));
-  })()`);
+  // Poll rendering progress rather than retaining a CDP evaluation across a
+  // hidden-to-visible transition. Still require real frames and finished motion.
+  await cdp.evaluate(`window.__settleFrames=0;
+    requestAnimationFrame(() => {
+      window.__settleFrames++;
+      requestAnimationFrame(() => window.__settleFrames++);
+    }); true`);
+  await waitFor(() => cdp.evaluate(`document.fonts.status === 'loaded' && window.__settleFrames >= 2
+    && document.getAnimations().filter(animation => animation.effect?.getComputedTiming().iterations !== Infinity)
+      .every(animation => animation.playState === 'finished' || animation.playState === 'idle')`),
+  "fonts, animation frames and completed motion");
 }
 
 async function trayAction(child, action, screenshot) {
@@ -103,7 +108,7 @@ async function connectCdp(debugPort) {
     const id = nextId++;
     const timer = setTimeout(() => {
       pending.delete(id);
-      reject(new Error(`CDP timeout: ${method}`));
+      reject(new Error(`CDP timeout: ${method}${params.expression ? ` · ${params.expression}` : ""}`));
     }, 15000);
     pending.set(id, { resolve, reject, timer });
     socket.send(JSON.stringify({ id, method, params }));
@@ -207,7 +212,13 @@ async function launch(index, scenario) {
       try {
         const image = await cdp.send("Page.captureScreenshot", { format: "png" });
         await writeFile(path.join(report, `failure-${index}.png`), Buffer.from(image.data, "base64"));
-        const document = await cdp.evaluate(`({title:document.title,text:document.body.innerText,profile:document.querySelector('#profile')?.value})`);
+        const document = await cdp.evaluate(`({
+          title:document.title,text:document.body.innerText,profile:document.querySelector('#profile')?.value,
+          visibility:document.visibilityState,focused:document.hasFocus(),settleFrames:window.__settleFrames,
+          animations:document.getAnimations().map(animation => ({
+            state:animation.playState,currentTime:animation.currentTime,pending:animation.pending
+          }))
+        })`);
         await writeFile(path.join(report, `failure-${index}.json`), JSON.stringify(document, null, 2));
       } catch (diagnosticError) {
         run.diagnosticError = String(diagnosticError);
