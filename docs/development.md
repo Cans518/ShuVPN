@@ -50,7 +50,9 @@ Windows：
 ./tool/verify_desktop.ps1 -GuiSmoke
 ```
 
-Linux 需额外安装 `libcap2-bin`、`iproute2`、`python3-gi`、`gir1.2-atspi-2.0`、`xvfb`、`xdotool`、`xauth`、`x11-utils`、`dbus-x11`：
+Windows 缺少 WebView2 Runtime 时可运行 `tool/install_webview2.ps1`，脚本会验证 Microsoft 安装程序签名后安装。CI 在窗口验收前自动检查运行时。
+
+Linux 需额外安装 `libcap2-bin`、`iproute2`、`python3-gi`、`gir1.2-atspi-2.0`、`at-spi2-core`、`xvfb`、`xdotool`、`xauth`、`x11-utils`、`dbus-x11`：
 
 ```bash
 SHUVPN_GUI_SMOKE=1 SHUVPN_NETWORK_SMOKE=1 bash tool/verify_desktop.sh

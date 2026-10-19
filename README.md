@@ -2,7 +2,7 @@
 
 连接上海大学校园网络的 Windows 与 Linux 桌面客户端。
 
-**0.6.1** · [下载安装](#下载安装) · [使用指南](docs/user-guide.md) · [自定义主题](docs/themes.md) · [更新记录](CHANGELOG.md)
+**0.6.2** · [下载安装](#下载安装) · [使用指南](docs/user-guide.md) · [自定义主题](docs/themes.md) · [更新记录](CHANGELOG.md)
 
 <p>
   <img src="docs/screenshots/home-light.png" alt="ShuVPN 浅色连接界面" width="300">
@@ -17,7 +17,7 @@
 
 ## 下载安装
 
-从 [GitHub Releases](https://github.com/shuosc/ShuVPN/releases) 获取对应桌面版本的完整安装包。
+从 [GitHub Releases](https://github.com/Cans518/ShuVPN/releases) 获取对应桌面版本的完整安装包。
 
 | 系统 | 推荐安装包 | 便携包 |
 | --- | --- | --- |

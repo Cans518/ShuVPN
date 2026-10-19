@@ -60,30 +60,69 @@ async function port() {
   return address.port;
 }
 
-async function waitFor(check, label, milliseconds = 20000) {
+async function waitFor(check, label, milliseconds = 20000, signal) {
   const deadline = Date.now() + milliseconds;
   let lastError;
   while (Date.now() < deadline) {
+    signal?.throwIfAborted();
     try {
       const result = await check();
       if (result) return result;
     } catch (error) { lastError = error; }
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
+  signal?.throwIfAborted();
   throw new Error(`Timed out: ${label}`, { cause: lastError });
 }
 
-async function connectCdp(debugPort) {
-  const target = await waitFor(async () => {
-    const response = await fetch(`http://127.0.0.1:${debugPort}/json/list`);
-    const targets = await response.json();
-    return targets.find((target) => target.type === "page" && target.url.includes("tauri.localhost"));
-  }, "WebView target");
-  const socket = new WebSocket(target.webSocketDebuggerUrl);
-  await new Promise((resolve, reject) => {
-    socket.addEventListener("open", resolve, { once: true });
-    socket.addEventListener("error", reject, { once: true });
-  });
+async function openWebSocket(url, signal) {
+  signal.throwIfAborted();
+  const socket = new WebSocket(url);
+  try {
+    await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => finish(new Error("WebView debugging socket startup timed out")), 15000);
+      const opened = () => finish();
+      const failed = () => finish(new Error("WebView debugging socket failed to open"));
+      const closed = () => finish(new Error("WebView debugging socket closed before opening"));
+      const aborted = () => finish(signal.reason);
+      function finish(error) {
+        clearTimeout(timer);
+        socket.removeEventListener("open", opened);
+        socket.removeEventListener("error", failed);
+        socket.removeEventListener("close", closed);
+        signal.removeEventListener("abort", aborted);
+        if (error) reject(error);
+        else resolve();
+      }
+      socket.addEventListener("open", opened, { once: true });
+      socket.addEventListener("error", failed, { once: true });
+      socket.addEventListener("close", closed, { once: true });
+      signal.addEventListener("abort", aborted, { once: true });
+      if (signal.aborted) aborted();
+    });
+    return socket;
+  } catch (error) {
+    socket.close();
+    throw error;
+  }
+}
+
+async function connectCdp(debugPort, child) {
+  const startup = new AbortController();
+  const stopped = (code, signal) => startup.abort(new Error(`Application exited before WebView startup: code=${code}, signal=${signal}`));
+  child.once("exit", stopped);
+  if (child.exitCode !== null || child.signalCode !== null) stopped(child.exitCode, child.signalCode);
+  let socket;
+  try {
+    const target = await waitFor(async () => {
+      const response = await fetch(`http://127.0.0.1:${debugPort}/json/list`, { signal: startup.signal });
+      const targets = await response.json();
+      return targets.find((target) => target.type === "page" && target.url.includes("tauri.localhost"));
+    }, "WebView target", 60000, startup.signal);
+    socket = await openWebSocket(target.webSocketDebuggerUrl, startup.signal);
+  } finally {
+    child.off("exit", stopped);
+  }
   let nextId = 1;
   const pending = new Map();
   const exceptions = [];
@@ -163,7 +202,7 @@ async function launch(index, scenario) {
   runs.push(run);
   let cdp;
   try {
-    cdp = await connectCdp(debugPort);
+    cdp = await connectCdp(debugPort, child);
     await waitFor(() => cdp.evaluate(`document.querySelector('#connection-state')?.textContent === '尚未连接'`), "native startup");
     if (index === 2) {
       assert.equal(await cdp.evaluate(`window.__TAURI_INTERNALS__.invoke('plugin:window|is_visible',{label:'main'})`), false, "autostart mode must start hidden");
@@ -207,6 +246,8 @@ async function launch(index, scenario) {
     run.exitCode = code;
   } catch (error) {
     run.error = String(error);
+    run.exitCodeBeforeCleanup = child.exitCode;
+    run.exitSignalBeforeCleanup = child.signalCode;
     if (cdp) {
       run.exceptions = cdp.exceptions;
       try {
@@ -233,6 +274,7 @@ async function launch(index, scenario) {
       run.forcedCleanup = true;
     }
     await writeFile(path.join(report, `process-${index}.log`), Buffer.concat(output));
+    if (!run.passed) console.error(JSON.stringify({ ...run, output: Buffer.concat(output).toString("utf8") }, null, 2));
   }
 }
 

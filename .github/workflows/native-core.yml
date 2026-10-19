@@ -21,6 +21,9 @@ jobs:
       matrix:
         os: [windows-latest, ubuntu-22.04]
     runs-on: ${{ matrix.os }}
+    env:
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
     defaults:
       run:
         shell: bash
@@ -34,11 +37,16 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - name: Windows WebView2 Runtime
+        if: runner.os == 'Windows'
+        shell: pwsh
+        timeout-minutes: 5
+        run: ./tool/install_webview2.ps1
       - name: Linux desktop and native test dependencies
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends libwebkit2gtk-4.1-dev librsvg2-dev libayatana-appindicator3-dev pkg-config libcap2-bin iproute2 python3-gi gir1.2-atspi-2.0 xvfb xdotool xauth x11-utils dbus-x11
+          sudo apt-get install -y --no-install-recommends libwebkit2gtk-4.1-dev librsvg2-dev libayatana-appindicator3-dev pkg-config libcap2-bin iproute2 python3-gi gir1.2-atspi-2.0 at-spi2-core xvfb xdotool xauth x11-utils dbus-x11
       - name: Rust toolchain
         run: rustup show active-toolchain
       - run: npm ci --prefix desktop
