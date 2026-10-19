@@ -2,6 +2,11 @@ name: Release desktop
 
 on:
   workflow_dispatch:
+    inputs:
+      gui_probe:
+        description: Run only the Windows GUI suite against the current published version
+        type: boolean
+        default: false
   push:
     tags: ["v*"]
 
@@ -9,7 +14,69 @@ permissions:
   contents: read
 
 jobs:
+  gui-probe:
+    if: github.event_name == 'workflow_dispatch' && inputs.gui_probe
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Windows WebView2 Runtime
+        shell: pwsh
+        timeout-minutes: 5
+        run: ./tool/install_webview2.ps1
+      - name: Download published Windows archive
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $version = (Get-Content desktop/package.json -Raw | ConvertFrom-Json).version
+          gh release download "v$version" --repo $env:GITHUB_REPOSITORY --pattern "ShuVPN-$version-windows-x64.zip*" --dir build/download
+          if ($LASTEXITCODE) { throw 'Published Windows archive download failed' }
+      - name: Verify and unpack published Windows archive
+        shell: bash
+        run: |
+          python - <<'PY'
+          import hashlib
+          from pathlib import Path
+          from tool.package_desktop import verify_release_package
+          from tool.package_installers import unpack
+          from tool.release import read_build_info, release_version, validate_build
+          version = release_version()
+          archive = Path(f"build/download/ShuVPN-{version}-windows-x64.zip")
+          expected, name = archive.with_name(archive.name + ".sha256").read_text().strip().split("  ", 1)
+          assert name == archive.name and hashlib.sha256(archive.read_bytes()).hexdigest() == expected
+          verify_release_package(archive)
+          destination = Path("build/release-bundle")
+          destination.mkdir(parents=True)
+          unpack(archive, destination)
+          info = read_build_info(destination / "shuvpn.exe")
+          validate_build(info, "windows", version)
+          print(info)
+          PY
+      - name: Published Windows full WebView suite
+        shell: bash
+        run: node tool/tauri_windows_smoke.mjs build/release-bundle/shuvpn.exe build/release-window
+      - name: GUI probe diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-gui-probe
+          if-no-files-found: ignore
+          path: |
+            build/release-window/verification.json
+            build/release-window/process*.log
+            build/release-window/failure*.json
+            build/release-window/failure*.png
+            build/release-window/home*.png
+            build/release-window/window*.png
+
   package:
+    if: ${{ !inputs.gui_probe }}
     strategy:
       fail-fast: false
       matrix:

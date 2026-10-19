@@ -107,7 +107,7 @@ async function openWebSocket(url, signal) {
   }
 }
 
-async function connectCdp(debugPort, child) {
+async function connectCdp(debugPort, child, discovery) {
   const startup = new AbortController();
   const stopped = (code, signal) => startup.abort(new Error(`Application exited before WebView startup: code=${code}, signal=${signal}`));
   child.once("exit", stopped);
@@ -115,9 +115,20 @@ async function connectCdp(debugPort, child) {
   let socket;
   try {
     const target = await waitFor(async () => {
-      const response = await fetch(`http://127.0.0.1:${debugPort}/json/list`, { signal: startup.signal });
-      const targets = await response.json();
-      return targets.find((target) => target.type === "page" && target.url.includes("tauri.localhost"));
+      discovery.attempts++;
+      try {
+        const response = await fetch(`http://127.0.0.1:${debugPort}/json/list`, {
+          signal: AbortSignal.any([startup.signal, AbortSignal.timeout(3000)]),
+        });
+        discovery.lastStatus = response.status;
+        const targets = await response.json();
+        discovery.lastTargets = targets.map(({ id, type, url }) => ({ id, type, url }));
+        discovery.lastError = null;
+        return targets.find((target) => target.type === "page" && target.url.includes("tauri.localhost"));
+      } catch (error) {
+        discovery.lastError = String(error);
+        throw error;
+      }
     }, "WebView target", 60000, startup.signal);
     socket = await openWebSocket(target.webSocketDebuggerUrl, startup.signal);
   } finally {
@@ -161,6 +172,22 @@ async function connectCdp(debugPort, child) {
   return { socket, send, evaluate, exceptions };
 }
 
+async function snapshotStartup(child, debugPort) {
+  const powershell = path.join(process.env.SystemRoot, "System32/WindowsPowerShell/v1.0/powershell.exe");
+  const shell = spawn(powershell, [
+    "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-File",
+    path.resolve("tool/windows_webview_snapshot.ps1"), "-ApplicationPid", String(child.pid),
+    "-DebugPort", String(debugPort),
+  ], { windowsHide: true, timeout: 10000, stdio: ["ignore", "pipe", "pipe"] });
+  const output = [];
+  const errors = [];
+  shell.stdout.on("data", chunk => output.push(chunk));
+  shell.stderr.on("data", chunk => errors.push(chunk));
+  const [code] = await once(shell, "exit");
+  assert.equal(code, 0, Buffer.concat(errors).toString());
+  return JSON.parse(Buffer.concat(output).toString().replace(/^\uFEFF/, ""));
+}
+
 async function closeWindow(child) {
   assert(Number.isInteger(child.pid));
   const command = `
@@ -193,7 +220,10 @@ async function launch(index, scenario) {
   child.stdout.on("data", (chunk) => output.push(chunk));
   child.stderr.on("data", (chunk) => output.push(chunk));
   const exit = once(child, "exit");
-  const run = { index, pid: child.pid, passed: false, startedAt: new Date().toISOString() };
+  const run = {
+    index, pid: child.pid, passed: false, startedAt: new Date().toISOString(),
+    discovery: { debugPort, attempts: 0, lastStatus: null, lastTargets: [], lastError: null },
+  };
   child.on("exit", (code, signal) => {
     run.exitCode = code;
     run.exitSignal = signal;
@@ -202,7 +232,7 @@ async function launch(index, scenario) {
   runs.push(run);
   let cdp;
   try {
-    cdp = await connectCdp(debugPort, child);
+    cdp = await connectCdp(debugPort, child, run.discovery);
     await waitFor(() => cdp.evaluate(`document.querySelector('#connection-state')?.textContent === '尚未连接'`), "native startup");
     if (index === 2) {
       assert.equal(await cdp.evaluate(`window.__TAURI_INTERNALS__.invoke('plugin:window|is_visible',{label:'main'})`), false, "autostart mode must start hidden");
@@ -248,6 +278,14 @@ async function launch(index, scenario) {
     run.error = String(error);
     run.exitCodeBeforeCleanup = child.exitCode;
     run.exitSignalBeforeCleanup = child.signalCode;
+    if (!cdp && child.exitCode === null && child.signalCode === null) {
+      try {
+        run.startupSnapshot = await snapshotStartup(child, debugPort);
+        await writeFile(path.join(report, `failure-startup-${index}.json`), JSON.stringify(run.startupSnapshot, null, 2));
+      } catch (snapshotError) {
+        run.startupSnapshotError = String(snapshotError);
+      }
+    }
     if (cdp) {
       run.exceptions = cdp.exceptions;
       try {

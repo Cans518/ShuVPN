@@ -273,7 +273,7 @@ def _package_bundle(platform: str, bundle: Path, output: Path, release_info: dic
         archive.replace(destination)
     checksum = destination.with_name(destination.name + ".sha256")
     checksum.write_text(
-        f"{digest(destination.read_bytes())}  {destination.name}\n", encoding="ascii"
+        f"{digest(destination.read_bytes())}  {destination.name}\n", encoding="ascii", newline="\n"
     )
     return destination
 

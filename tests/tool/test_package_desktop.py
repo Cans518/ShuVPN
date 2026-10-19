@@ -80,6 +80,12 @@ class DesktopBundleFixture:
         return bundle
 
 class DesktopPackageTest(DesktopBundleFixture, unittest.TestCase):
+    def test_checksum_sidecar_uses_portable_lf_line_endings(self):
+        archive = package_bundle("windows", self.bundle("windows"), self.directory / "output")
+        checksum = archive.with_name(archive.name + ".sha256").read_bytes()
+        expected = f"{hashlib.sha256(archive.read_bytes()).hexdigest()}  {archive.name}\n".encode("ascii")
+        self.assertEqual(checksum, expected)
+
     def release_bundle(self, platform: str) -> Path:
         bundle = self.bundle(platform)
         (bundle / "icon.png").write_bytes(b"icon fixture")
