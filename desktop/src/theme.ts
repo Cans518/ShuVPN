@@ -6,6 +6,7 @@ export const palettes = [
   { id: "jade", name: "青竹", color: "#19745d", dark: "#79d8b6" },
   { id: "iris", name: "暮紫", color: "#7753a6", dark: "#c5a7f3" },
   { id: "amber", name: "暖砂", color: "#9b5d21", dark: "#efbe84" },
+  { id: "nailong", name: "奶龙", color: "#FFB74D", dark: "#FFE082" },
 ];
 
 let saved: Appearance | undefined;
@@ -17,6 +18,13 @@ darkPreference.addEventListener("change", () => applyAppearance());
 
 export function currentAppearance(): Appearance | undefined {
   return saved;
+}
+
+export function setThemeMode(mode: string): void {
+  const root = document.documentElement;
+  if (mode === "system" || mode === "") delete root.dataset.theme;
+  else if (root.dataset.theme !== mode) root.dataset.theme = mode;
+  applyAppearance();
 }
 
 export function previewAppearance(appearance?: Appearance): void {
@@ -54,6 +62,7 @@ export function applyAppearance(): void {
   if (!appearance) return;
   const root = document.documentElement;
   const dark = root.dataset.theme === "dark" || (!root.dataset.theme && darkPreference.matches);
+  root.dataset.colorScheme = dark ? "dark" : "light";
   const keys: (keyof ThemeColors)[] = ["accent", "canvas", "surface", "ink", "muted", "border"];
   for (const key of keys) root.style.removeProperty(`--${key}`);
   root.style.removeProperty("--on-accent");
@@ -63,12 +72,11 @@ export function applyAppearance(): void {
     for (const key of keys) root.style.setProperty(`--${key}`, colors[key]);
     root.style.setProperty("--on-accent", accentTextColor(colors.accent));
   } else {
+    // 奶龙的完整明暗色板由样式表管理，其他内置色板只覆盖主色。
     const palette = palettes.find((palette) => palette.id === appearance.palette) ?? palettes[0];
-    if (palette) {
+    if (palette && palette.id !== "nailong") {
       root.style.setProperty("--accent", dark ? palette.dark : palette.color);
-      root.style.setProperty("--canvas", `color-mix(in srgb, var(--accent) 5%, ${dark ? "#141c29" : "#f8fafc"})`);
-      root.style.setProperty("--surface", dark ? "color-mix(in srgb, var(--accent) 4%, #1b2433)" : "#ffffff");
-      root.style.setProperty("--border", `color-mix(in srgb, var(--accent) 12%, ${dark ? "#344055" : "#e3e8f0"})`);
+      root.style.setProperty("--on-accent", accentTextColor(dark ? palette.dark : palette.color));
     }
   }
 }

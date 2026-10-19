@@ -1,6 +1,7 @@
 import {
   createElement, ArrowDown, ArrowUp, ChevronLeft, History, ListFilter,
   Power, Settings2, ShieldCheck, UserRound, Minus, X, Palette,
+  Sun, Moon, Monitor,
 } from "lucide";
 
 const icons = {
@@ -16,6 +17,9 @@ const icons = {
   minimize: Minus,
   close: X,
   palette: Palette,
+  sun: Sun,
+  moon: Moon,
+  monitor: Monitor,
 };
 
 function isIconName(value: string): value is keyof typeof icons {

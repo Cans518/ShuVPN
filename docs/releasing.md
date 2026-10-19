@@ -7,7 +7,7 @@
 在 `CHANGELOG.md` 中维护 `## 版本号 - YYYY-MM-DD` 节。正式版本只接受 `主版本.次版本.修订号`；标签必须为 `v版本号`。
 
 ```bash
-python3 tool/release.py check --tag v0.6.2
+python3 tool/release.py check --tag v0.6.3
 python3 tool/release.py notes --output build/release-notes.md
 ```
 
@@ -16,14 +16,14 @@ python3 tool/release.py notes --output build/release-notes.md
 先运行[开发验证](development.md)并提交源码。发布命令要求 Git 工作树干净；构建产生的文件应留在被忽略的 `build/`、`target/` 和 `dist/`。
 
 ```bash
-python3 tool/release.py check --tag v0.6.2 --clean
+python3 tool/release.py check --tag v0.6.3 --clean
 npm ci --prefix desktop
 npm run build --prefix desktop
 cargo build --locked -p shuvpn_desktop --release --features tauri/custom-protocol --bin shuvpn
 cargo build --locked -p shuvpn_core --release --bin shuvpn_tun_helper
 python3 tool/stage_desktop.py --platform linux --binaries target/release --output build/release-staging --release
 python3 tool/package_desktop.py release --platform linux --bundle build/release-staging --output build/packages
-python3 tool/package_installers.py build/packages/ShuVPN-0.6.2-linux-x64.tar.gz --output build/packages --release
+python3 tool/package_installers.py build/packages/ShuVPN-0.6.3-linux-x64.tar.gz --output build/packages --release
 ```
 
 Windows 将平台改为 `windows`，安装器编译使用 `tool/install_inno_setup.ps1` 提供的固定 Inno Setup 编译器，并向 `package_installers.py` 传入 `--iscc`。

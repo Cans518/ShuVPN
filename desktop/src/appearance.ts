@@ -29,11 +29,11 @@ export function showAppearance(root: HTMLElement, run: (action: () => Promise<vo
   root.innerHTML = `
     <section class="panel appearance-panel" aria-labelledby="appearance-title">
       <h2 id="appearance-title">你的配色</h2>
-      <p>内置四种色调，均支持浅色、深色与跟随系统。</p>
-      <div class="palette-list" role="group" aria-label="配色方案">
+      <p>五种内置配色，支持浅色、深色与跟随系统。</p>
+      <section class="palette-list" aria-label="配色方案">
         ${palettes.map((palette) => `<button type="button" data-palette="${palette.id}" aria-pressed="false"><span class="swatch" style="--swatch:${palette.color}"></span>${palette.name}</button>`).join("")}
         <button type="button" data-palette="custom" aria-pressed="false"><span data-icon="palette"></span>自定义</button>
-      </div>
+      </section>
       <details class="theme-editor"><summary>编辑或导入自定义主题</summary>
         <form id="theme-form">
           <label>主题名称<input id="theme-name" maxlength="32" required></label>

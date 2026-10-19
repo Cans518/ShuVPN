@@ -58,7 +58,8 @@ impl Default for Appearance {
 
 impl Appearance {
     fn validate(&self) -> CommandResult<()> {
-        if !["ocean", "jade", "iris", "amber", "custom"].contains(&self.palette.as_str()) {
+        if !["ocean", "jade", "iris", "amber", "nailong", "custom"].contains(&self.palette.as_str())
+        {
             return Err(CommandError::new("theme", "请选择有效的配色方案"));
         }
         if self.custom_theme.name.trim().is_empty() || self.custom_theme.name.chars().count() > 32 {

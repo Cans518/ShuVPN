@@ -3,6 +3,8 @@ import type { DesktopSnapshot } from "./api";
 import { bytes, element, text } from "./dom";
 import { decorateIcons } from "./icons";
 
+const nailongImageUrl = new URL("./assets/nailong/nailong-official.png", import.meta.url).href;
+
 export const connectionPhaseLabels = {
   disconnected: "尚未连接",
   connecting: "正在建立连接",
@@ -64,12 +66,17 @@ export function createConnectionPage({ run, report, navigate, refreshView }: {
     root.innerHTML = `
       <section class="connection-card" aria-labelledby="connection-state">
         <p class="protocol-tag">aTrust <span>校园网络</span></p>
-        <button id="connect" class="power-button"><span data-icon="power"></span><span id="connect-label">登录账户</span></button>
-        <h1 id="connection-state" role="status" aria-live="polite">尚未连接</h1>
-        <p id="account-hint"></p>
+        <div class="connection-action">
+          <img class="nailong-mascot" src="${nailongImageUrl}" width="100" height="136" alt="奶龙官方 3D 形象">
+          <button id="connect" class="power-button"><span data-icon="power"></span><span id="connect-label">登录账户</span></button>
+        </div>
+        <div class="connection-status">
+          <h1 id="connection-state" role="status" aria-live="polite">尚未连接</h1>
+          <p id="account-hint"></p>
+        </div>
         <div class="traffic-summary" aria-label="累计流量">
-          <span><span data-icon="up"></span><span id="upload">0 B</span></span>
-          <span><span data-icon="down"></span><span id="download">0 B</span></span>
+          <span><span data-icon="up" aria-hidden="true"></span><span class="traffic-label">上传</span><span id="upload">0 B</span></span>
+          <span><span data-icon="down" aria-hidden="true"></span><span class="traffic-label">下载</span><span id="download">0 B</span></span>
         </div>
       </section>
       <section class="proxy-panel" aria-label="连接时启用的本机代理">

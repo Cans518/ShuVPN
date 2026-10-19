@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/version-0.6.2-2864ad?style=flat-square" alt="版本 0.6.2"></a>
+  <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/version-0.6.3-2864ad?style=flat-square" alt="版本 0.6.3"></a>
   <a href="#下载安装"><img src="https://img.shields.io/badge/platform-Windows%20%7C%20Linux-526e64?style=flat-square" alt="支持 Windows 与 Linux"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0-7853ad?style=flat-square" alt="AGPL-3.0 许可证"></a>
 </p>
@@ -35,8 +35,8 @@ ShuVPN 将账户登录、连接状态、代理设置与规则分流放在一个�
     <th align="center">深色外观</th>
   </tr>
   <tr>
-    <td align="center"><img src="docs/screenshots/home-light.png" alt="ShuVPN 0.6.2 浅色连接页，展示连接按钮、流量和 HTTP/SOCKS5 开关" width="320"></td>
-    <td align="center"><img src="docs/screenshots/home-dark.png" alt="ShuVPN 0.6.2 深色连接页，展示连接按钮、流量和 HTTP/SOCKS5 开关" width="320"></td>
+    <td align="center"><img src="docs/screenshots/home-light.png" alt="ShuVPN 0.6.3 浅色连接页，展示连接按钮、流量和 HTTP/SOCKS5 开关" width="320"></td>
+    <td align="center"><img src="docs/screenshots/home-dark.png" alt="ShuVPN 0.6.3 深色连接页，展示连接按钮、流量和 HTTP/SOCKS5 开关" width="320"></td>
   </tr>
 </table>
 
@@ -53,11 +53,11 @@ ShuVPN 将账户登录、连接状态、代理设置与规则分流放在一个�
 | 多种接入方式 | 按需开启 HTTP、SOCKS5、系统代理或 TUN |
 | 规则分流 | 修改规则后先校验、预览，再确认应用；支持回退上一份配置 |
 | 托盘与启动 | 从托盘连接、断开、切换代理配置或打开页面，可选登录系统时启动 |
-| 主题定制 | 晴海、青竹、暮紫、暖砂四套配色，支持自定义明暗主题、预览和 JSON 导入导出 |
+| 主题定制 | 晴海、青竹、暮紫、暖砂与奶龙五套配色，支持自定义明暗主题、预览和 JSON 导入导出 |
 
 ## 下载安装
 
-前往 **[GitHub Releases](https://github.com/Cans518/ShuVPN/releases)**，按系统选择完整安装包。当前仓库版本为 **0.6.2**，分发目标为 **x64**。
+前往 **[GitHub Releases](https://github.com/Cans518/ShuVPN/releases)**，按系统选择完整安装包。当前仓库版本为 **0.6.3**，分发目标为 **x64**。
 
 | 系统 | 推荐安装包 | 便携包 |
 | --- | --- | --- |

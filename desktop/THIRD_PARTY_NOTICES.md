@@ -1,5 +1,14 @@
 # Frontend open-source notices
 
+## 奶龙主题图片（非开源素材）
+
+`src/assets/nailong/nailong-official.png` 来自奶龙／七创社官方网站。
+来源页面：https://www.nailoong.com/business/ipIncubation/
+原图地址：https://www.nailoong.com/_ipx/q_85/img/business/nl_base_3d.png
+
+下载日期：2026-10-20。奶龙形象及图片版权归其权利人所有；官网未提供开放许可，
+本项目的 AGPL 许可证不授予该素材的权利。公开发布或再分发前应确认相应授权。
+
 ## Pico CSS 2.1.1
 
 Source: https://github.com/picocss/pico

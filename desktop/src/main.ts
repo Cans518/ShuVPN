@@ -4,7 +4,7 @@ import thirdPartyNotices from "../THIRD_PARTY_NOTICES.md?raw";
 import packageInfo from "../package.json";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { loadAppearance } from "./theme";
+import { loadAppearance, currentAppearance } from "./theme";
 import { backend, errorMessage } from "./api";
 import type { DesktopSnapshot } from "./api";
 import { applyTheme, element, text } from "./dom";
@@ -20,6 +20,9 @@ app.innerHTML = `
   <a class="skip-link" href="#content">跳到内容</a>
   <header class="titlebar" data-tauri-drag-region>
     <span class="titlebar-brand" data-tauri-drag-region><span data-icon="shield"></span>ShuVPN <small data-tauri-drag-region>校园网络</small></span>
+    <div class="titlebar-actions">
+      <button id="theme-cycle" class="titlebar-btn" aria-label="切换日夜模式" title="切换日夜模式"><span data-icon="sun"></span></button>
+    </div>
     <div class="window-controls">
       <button id="minimize-window" aria-label="最小化窗口" title="最小化"><span data-icon="minimize"></span></button>
       <button id="close-window" aria-label="关闭窗口并保留托盘" title="关闭窗口，继续在托盘运行"><span data-icon="close"></span></button>
@@ -41,6 +44,56 @@ app.innerHTML = `
   <footer class="app-footer"><span id="app-state">正在启动</span><div id="feedback" role="status" aria-live="polite" hidden></div><details><summary>${packageInfo.version} · 开源许可</summary><pre id="third-party-notices"></pre></details></footer>`;
 text(app, "#third-party-notices", thirdPartyNotices);
 decorateIcons(app);
+
+// Theme cycle: light → dark → system, persisted via saveSettings
+const themeModes = ["light", "dark", "system"] as const;
+const themeIcons: Record<string, string> = { light: "sun", dark: "moon", system: "monitor" };
+const themeLabels: Record<string, string> = { light: "切换至深色", dark: "切换至跟随系统", system: "切换至浅色" };
+
+function updateThemeCycleButton(mode: string): void {
+  const btn = app.querySelector<HTMLButtonElement>("#theme-cycle");
+  if (!btn) return;
+  btn.setAttribute("aria-label", themeLabels[mode] ?? "切换主题");
+  btn.setAttribute("title", themeLabels[mode] ?? "切换主题");
+  btn.dataset.themeMode = mode;
+  const span = btn.querySelector<HTMLElement>("[data-icon]");
+  if (span) {
+    span.dataset.icon = themeIcons[mode] ?? "sun";
+    decorateIcons(btn);
+  }
+}
+
+// Nailong connection sound: play 2s–5s of the laugh audio when connected
+import nailongLaughUrl from "./assets/nailong/videoplayback.m4a?url";
+let nailongAudioBuffer: AudioBuffer | null = null;
+let nailongAudioCtx: AudioContext | null = null;
+
+async function loadNailongSound(): Promise<void> {
+  try {
+    nailongAudioCtx = new AudioContext();
+    const response = await fetch(nailongLaughUrl);
+    const arrayBuffer = await response.arrayBuffer();
+    nailongAudioBuffer = await nailongAudioCtx.decodeAudioData(arrayBuffer);
+  } catch { /* audio unavailable */ }
+}
+
+let lastPhase = "disconnected";
+function maybePlayNailongSound(phase: string): void {
+  if (phase !== "connected" || lastPhase === "connected") { lastPhase = phase; return; }
+  lastPhase = phase;
+  if (currentAppearance()?.palette !== "nailong") return;
+  if (!nailongAudioCtx || !nailongAudioBuffer) return;
+  try {
+    if (nailongAudioCtx.state === "suspended") void nailongAudioCtx.resume();
+    const source = nailongAudioCtx.createBufferSource();
+    source.buffer = nailongAudioBuffer;
+    const gain = nailongAudioCtx.createGain();
+    gain.gain.value = 0.85;
+    source.connect(gain);
+    gain.connect(nailongAudioCtx.destination);
+    source.start(0, 2, 3); // 从第 2s 开始播放 3s，即 2s~5s
+  } catch { /* ignore */ }
+}
 
 let currentPage = "connect";
 let snapshot: DesktopSnapshot | null = null;
@@ -93,6 +146,8 @@ function navigate(page: string): void {
 function update(current: DesktopSnapshot): void {
   snapshot = current;
   applyTheme(current.settings.themeMode);
+  updateThemeCycleButton(current.settings.themeMode);
+  maybePlayNailongSound(current.connection.phase);
   app.dataset.phase = current.connection.phase;
   text(app, "#app-state", connectionPhaseLabels[current.connection.phase]);
   const root = element(app, "#content", HTMLDivElement);
@@ -109,8 +164,13 @@ async function showPage(page: string): Promise<void> {
   if (revision !== pageRevision) return;
   if (currentPage === "account") await accountPage.cancelWork(snapshot);
   if (revision !== pageRevision) return;
+  // 方向感切换：按导航栏顺序判断前进/后退，驱动页面滑入方向
+  const order = ["connect", "account", "routing", "records", "settings"];
+  const fromIndex = order.indexOf(currentPage);
   accountPage.dispose();
   currentPage = page;
+  const toIndex = order.indexOf(page);
+  const direction = toIndex >= fromIndex ? "forward" : "back";
   for (const button of app.querySelectorAll<HTMLButtonElement>("nav button")) {
     if (button.dataset.page === page) button.setAttribute("aria-current", "page");
     else button.removeAttribute("aria-current");
@@ -121,6 +181,7 @@ async function showPage(page: string): Promise<void> {
   root.id = "content";
   root.tabIndex = -1;
   root.dataset.page = page;
+  root.dataset.direction = direction;
   previous.replaceWith(root);
   element(app, "main", HTMLElement).scrollTop = 0;
   if (page === "settings") disposePage = showSettings(root, snapshot.settings, run);
@@ -158,6 +219,17 @@ for (const button of app.querySelectorAll<HTMLButtonElement>("nav button")) {
 element(app, "#minimize-window", HTMLButtonElement).onclick = () => { void getCurrentWindow().minimize().catch(report); };
 element(app, "#close-window", HTMLButtonElement).onclick = () => { void backend.hideWindow().catch(report); };
 
+// Theme cycle button: light → dark → system → light …
+element(app, "#theme-cycle", HTMLButtonElement).onclick = () => {
+  if (!snapshot) return;
+  const current = snapshot.settings.themeMode;
+  const idx = themeModes.indexOf(current as typeof themeModes[number]);
+  const next = themeModes[(idx >= 0 ? idx + 1 : 0) % themeModes.length] ?? "system";
+  run(async () => {
+    await backend.saveSettings([{ key: "themeMode", value: next }]);
+  });
+};
+
 window.addEventListener("pagehide", () => { clearTimeout(pollTimer); clearTimeout(feedbackTimer); });
 
 async function start(): Promise<void> {
@@ -166,6 +238,7 @@ async function start(): Promise<void> {
     if (["connect", "account", "routing", "records", "settings"].includes(event.payload)) navigate(event.payload);
   });
   await loadAppearance();
+  void loadNailongSound(); // non-blocking, best-effort
   snapshot = await backend.snapshot();
   await showPage("connect");
   await poll();

@@ -16,9 +16,7 @@ export function bytes(value: number): string {
 }
 
 export function applyTheme(mode: string): void {
-  if (mode === "system") delete document.documentElement.dataset.theme;
-  else if (document.documentElement.dataset.theme !== mode) document.documentElement.dataset.theme = mode;
-  applyAppearance();
+  setThemeMode(mode);
 }
-import { applyAppearance } from "./theme";
+import { setThemeMode } from "./theme";
 
