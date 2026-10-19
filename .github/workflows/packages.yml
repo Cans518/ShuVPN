@@ -60,6 +60,8 @@ jobs:
           PY
       - name: Published Windows full WebView suite
         shell: bash
+        env:
+          SHUVPN_WEBVIEW2_DEBUG_TRANSPORT: registry
         run: node tool/tauri_windows_smoke.mjs build/release-bundle/shuvpn.exe build/release-window
       - name: GUI probe diagnostics
         if: always()
