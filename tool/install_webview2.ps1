@@ -1,4 +1,3 @@
-param([switch]$Refresh)
 $ErrorActionPreference = 'Stop'
 if ($env:OS -ne 'Windows_NT') { throw 'WebView2 Runtime requires Windows' }
 $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
@@ -23,8 +22,7 @@ function Get-WebViewRuntimeVersion {
 }
 
 $runtime = Get-WebViewRuntimeVersion
-if ($runtime) { Write-Output "Existing WebView2 Runtime: $runtime" }
-if (-not $runtime -or $Refresh) {
+if (-not $runtime) {
     $repository = Split-Path -Parent $PSScriptRoot
     $tools = Join-Path $repository 'build/tools'
     New-Item -ItemType Directory -Force -Path $tools | Out-Null

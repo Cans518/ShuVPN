@@ -25,8 +25,7 @@ try {
     if ($GuiSmoke) {
         $report = 'build/desktop/tauri/windows-' + (Get-Date -Format yyyyMMdd-HHmmss)
         New-Item -ItemType Directory -Path (Split-Path -Parent $report) -Force | Out-Null
-        node tool/tauri_windows_smoke.mjs target/debug/shuvpn.exe $report
-        if ($LASTEXITCODE) { throw 'Windows WebView smoke failed' }
+        & (Join-Path $PSScriptRoot 'windows_gui_user.ps1') -Application target/debug/shuvpn.exe -Report $report
     }
 } finally {
     $env:SHUVPN_WINTUN_DLL = $previousDriver

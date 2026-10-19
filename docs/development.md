@@ -52,6 +52,8 @@ Windows：
 
 Windows 缺少 WebView2 Runtime 时可运行 `tool/install_webview2.ps1`，脚本会验证 Microsoft 安装程序签名后安装。CI 在窗口验收前自动检查运行时。
 
+Windows GUI 套件通过 `tool/windows_gui_user.ps1` 启动；管理员宿主会为同一用户创建普通用户权限的进程，保持真实桌面客户端的运行上下文。原生单元测试保持原权限。Actions 的 `gui_probe` 手动输入可仅下载当前已发布 Windows 便携包并运行完整 GUI 套件，用于快速复现运行环境问题。
+
 Linux 需额外安装 `libcap2-bin`、`iproute2`、`python3-gi`、`gir1.2-atspi-2.0`、`at-spi2-core`、`xvfb`、`xdotool`、`xauth`、`x11-utils`、`dbus-x11`：
 
 ```bash

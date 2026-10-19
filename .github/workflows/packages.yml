@@ -29,18 +29,6 @@ jobs:
         shell: pwsh
         timeout-minutes: 5
         run: ./tool/install_webview2.ps1
-      - name: Verify child browser-argument environment
-        shell: bash
-        run: |
-          node --input-type=module <<'JS'
-          import { spawnSync } from "node:child_process";
-          const key = "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS";
-          const expected = "--remote-debugging-port=9991";
-          const environment = { ...process.env, [key]: expected };
-          const result = spawnSync(process.execPath, ["-e", `process.stdout.write(process.env.${key} ?? "")`], { env: environment, encoding: "utf8" });
-          if (result.status !== 0 || result.stdout !== expected) throw new Error("WebView2 arguments were not forwarded to the child environment");
-          console.log("WebView2 child environment passed");
-          JS
       - name: Download published Windows archive
         shell: pwsh
         env:
@@ -167,7 +155,8 @@ jobs:
           PY
       - name: Windows packaged release window
         if: runner.os == 'Windows'
-        run: node tool/tauri_windows_smoke.mjs build/release-bundle/shuvpn.exe build/release-window
+        shell: pwsh
+        run: ./tool/windows_gui_user.ps1 -Application build/release-bundle/shuvpn.exe -Report build/release-window
       - name: Linux packaged release window
         if: runner.os == 'Linux'
         run: xvfb-run -a -s "-screen 0 1024x900x24" dbus-run-session -- /usr/bin/python3 tool/tauri_linux_smoke.py --executable "$PWD/build/release-bundle/shuvpn" --report "$PWD/build/release-window"
@@ -205,9 +194,52 @@ jobs:
             build/release-window/failure*.json
             build/release-window/failure*.png
 
+  verify-artifacts:
+    needs: package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: shuvpn-*-x64
+          path: build/packages
+          merge-multiple: true
+      - name: Verify all distribution checksums
+        working-directory: build/packages
+        run: sha256sum --check *.sha256
+      - name: Verify portable and installer source identities
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from tool.package_desktop import source_identity
+          from tool.package_installers import sha256, validate_installer_release
+          from tool.release import release_version
+          version = release_version()
+          source = source_identity()
+          output = Path("build/packages")
+          for platform, extension, suffix in (
+              ("windows", "zip", "windows-x64-setup.exe"),
+              ("linux", "tar.gz", "linux-x64.deb"),
+          ):
+              archive = output / f"ShuVPN-{version}-{platform}-x64.{extension}"
+              installer = output / f"ShuVPN-{version}-{suffix}"
+              validate_installer_release(archive)
+              metadata = json.loads(installer.with_name(installer.name + ".json").read_text())
+              assert metadata["version"] == version and metadata["platform"] == platform
+              assert metadata["payload_source"] == source == metadata["builder_source"]
+              assert metadata["input_sha256"] == sha256(archive)
+              assert metadata["sha256"] == sha256(installer)
+              assert metadata["size"] == installer.stat().st_size
+          print("ALL_DISTRIBUTION_IDENTITIES_VERIFIED")
+          PY
+
   publish:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: package
+    needs: [package, verify-artifacts]
     runs-on: ubuntu-latest
     permissions:
       contents: write

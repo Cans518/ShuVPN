@@ -14,7 +14,8 @@ $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
 $principal = [Security.Principal.WindowsPrincipal]::new($identity)
 if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
     & $node $driver $applicationPath $reportPath
-    exit $LASTEXITCODE
+    if ($LASTEXITCODE) { throw "Windows GUI suite failed with exit code $LASTEXITCODE" }
+    return
 }
 
 # Keep the same user/profile while removing administrator rights for desktop UI.
@@ -118,4 +119,5 @@ public static class ShuGuiUser {
     }
 }
 '@
-exit [ShuGuiUser]::Run($node, $driver, $applicationPath, $reportPath, $repository)
+$result = [ShuGuiUser]::Run($node, $driver, $applicationPath, $reportPath, $repository)
+if ($result -ne 0) { throw "Windows GUI suite failed with exit code $result" }
